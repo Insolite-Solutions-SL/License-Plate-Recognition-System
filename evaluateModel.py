@@ -150,12 +150,17 @@ def visualize_predictions(
         image_size (int): Tamaño de las imágenes
         device (str): Dispositivo para inferencia
         metrics (dict): Diccionario con métricas para incluir en el README
-        output_dir (str): Directorio de salida (si ya existe)
+        output_dir (str): Directorio de salida (requerido)
     """
     # Verificar que YOLO está disponible
     if not YOLO_AVAILABLE:
         print("⚠️ Error: El módulo 'ultralytics' no está instalado.")
         print("Instale ultralytics con: pip install ultralytics")
+        return None
+
+    # Verificar que se proporcionó un directorio de salida
+    if output_dir is None:
+        print("⚠️ Error: Se requiere un directorio de salida (output_dir)")
         return None
 
     try:
@@ -187,16 +192,7 @@ def visualize_predictions(
         random.shuffle(image_files)
         samples = image_files[:num_samples]
 
-        # Preparar directorios para guardar las visualizaciones
-        model_dir = os.path.dirname(os.path.dirname(model_path))
-        train_name = os.path.basename(model_dir)
-
-        # Si no se proporciona un directorio, crear uno nuevo
-        if output_dir is None:
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            results_base_dir = "./resultados"
-            output_dir = os.path.join(results_base_dir, train_name, timestamp)
-
+        # Usar el directorio de salida proporcionado
         os.makedirs(output_dir, exist_ok=True)
 
         print(f"\n=== Generando visualizaciones para {len(samples)} imágenes ===")
@@ -288,7 +284,7 @@ def plot_metrics_comparison(metrics, output_dir=None):
 
     Args:
         metrics (dict): Diccionario con las métricas para cada conjunto
-        output_dir (str): Directorio donde guardar la imagen (además de la raíz)
+        output_dir (str): Directorio donde guardar la imagen
     """
     if not metrics or len(metrics) < 2:
         print("No hay suficientes datos para generar gráficas comparativas")
@@ -352,15 +348,14 @@ def plot_metrics_comparison(metrics, output_dir=None):
     # Ajustar layout y guardar
     plt.tight_layout(rect=[0, 0, 1, 0.95])
 
-    # Guardar en el directorio raíz para compatibilidad
-    plt.savefig("./metrics_comparison.png")
-
-    # Guardar también en el directorio de resultados si se proporciona
+    # Guardar solo en el directorio de resultados
     if output_dir:
         plt.savefig(os.path.join(output_dir, "metrics_comparison.png"))
         print(f"\nGráfica comparativa guardada en: {output_dir}/metrics_comparison.png")
     else:
-        print("\nGráfica comparativa guardada como: metrics_comparison.png")
+        print(
+            "\nNo se pudo guardar la gráfica comparativa, no se proporcionó un directorio"
+        )
 
 
 def continue_training(
@@ -553,7 +548,7 @@ if __name__ == "__main__":
         # Crear un diccionario de métricas para análisis
         metrics = {"val": val_metrics, "test": test_metrics}
 
-        # Preparar directorio único para todos los resultados
+        # Preparar directorio único para todos los resultados (UN SOLO TIMESTAMP)
         model_dir = os.path.dirname(os.path.dirname(args.model))
         train_name = os.path.basename(model_dir)
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -561,7 +556,7 @@ if __name__ == "__main__":
         results_dir = os.path.join(results_base_dir, train_name, timestamp)
         os.makedirs(results_dir, exist_ok=True)
 
-        # Generar gráficas comparativas y guardarlas en el directorio de resultados
+        # Generar gráficas comparativas y guardarlas solo en el directorio de resultados
         if metrics and len(metrics) > 0:
             plot_metrics_comparison(metrics, results_dir)
         else:
@@ -575,7 +570,7 @@ if __name__ == "__main__":
             image_size=args.imgsz,
             device=args.device,
             metrics=metrics,
-            output_dir=results_dir,
+            output_dir=results_dir,  # Usar el mismo directorio creado arriba
         )
 
         # Continuar entrenamiento si se solicitó
