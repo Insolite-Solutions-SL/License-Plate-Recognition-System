@@ -26,6 +26,36 @@ def evaluate_model(model_path, data_path, batch_size=16, image_size=640, device=
     if not os.path.exists(data_path):
         raise FileNotFoundError(f"No se encontró el archivo data.yaml en {data_path}")
 
+    # Verificar que los directorios de datos existen
+    # Leer la configuración de data.yaml
+    import yaml
+
+    try:
+        with open(data_path, "r") as f:
+            data_config = yaml.safe_load(f)
+
+        # Verificar si los directorios de imágenes existen
+        data_dir = os.path.dirname(data_path)
+        val_dir = os.path.join(data_dir, data_config.get("val", ""))
+        test_dir = os.path.join(data_dir, data_config.get("test", ""))
+
+        if not os.path.exists(val_dir):
+            print(f"ADVERTENCIA: No se encontró el directorio de validación: {val_dir}")
+            print(
+                "Es posible que la evaluación falle si los datos no están disponibles localmente."
+            )
+
+        if not os.path.exists(test_dir):
+            print(f"ADVERTENCIA: No se encontró el directorio de prueba: {test_dir}")
+            print(
+                "Es posible que la evaluación falle si los datos no están disponibles localmente."
+            )
+    except Exception as e:
+        print(f"Error al leer la configuración del archivo data.yaml: {e}")
+        print(
+            "Continuando de todos modos, pero pueden ocurrir errores durante la evaluación."
+        )
+
     # Nombre base para los directorios de resultados
     model_name = os.path.basename(model_path).split(".")[0]
 
@@ -47,7 +77,13 @@ def evaluate_model(model_path, data_path, batch_size=16, image_size=640, device=
     ]
 
     print(f"Ejecutando: {' '.join(val_cmd)}")
-    subprocess.run(val_cmd)
+    try:
+        subprocess.run(val_cmd, check=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Error durante la evaluación en el conjunto de validación: {e}")
+        print(
+            "Esto puede ocurrir si los datos de validación no están disponibles localmente."
+        )
 
     # 2. Evaluar en el conjunto de prueba
     print(f"\n=== Evaluando {model_name} en el conjunto de PRUEBA ===")
@@ -69,7 +105,13 @@ def evaluate_model(model_path, data_path, batch_size=16, image_size=640, device=
     ]
 
     print(f"Ejecutando: {' '.join(test_cmd)}")
-    subprocess.run(test_cmd)
+    try:
+        subprocess.run(test_cmd, check=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Error durante la evaluación en el conjunto de prueba: {e}")
+        print(
+            "Esto puede ocurrir si los datos de prueba no están disponibles localmente."
+        )
 
     return f"./runs/detect/val", f"./runs/detect/test_results"
 
@@ -95,6 +137,16 @@ def visualize_predictions(
 
     test_images_dir = os.path.join(os.path.dirname(data_path), data_config["test"])
 
+    # Verificar si el directorio existe
+    if not os.path.exists(test_images_dir):
+        print(
+            f"ERROR: No se encontró el directorio de imágenes de prueba: {test_images_dir}"
+        )
+        print(
+            "Saltando visualización de predicciones ya que las imágenes no están disponibles localmente."
+        )
+        return None
+
     # Listar todas las imágenes y seleccionar muestras aleatorias
     image_files = []
     for ext in ("*.jpg", "*.jpeg", "*.png", "*.bmp"):
@@ -102,7 +154,7 @@ def visualize_predictions(
 
     if not image_files:
         print(f"No se encontraron imágenes en {test_images_dir}")
-        return
+        return None
 
     # Seleccionar muestras aleatorias
     import random
@@ -134,10 +186,17 @@ def visualize_predictions(
         f"\n=== Generando visualizaciones de predicciones para {len(samples)} imágenes ==="
     )
     print(f"Ejecutando: {' '.join(predict_cmd)}")
-    subprocess.run(predict_cmd)
 
-    print(f"Visualizaciones guardadas en: {os.path.join(output_dir, 'samples')}")
-    return os.path.join(output_dir, "samples")
+    try:
+        subprocess.run(predict_cmd, check=True)
+        print(f"Visualizaciones guardadas en: {os.path.join(output_dir, 'samples')}")
+        return os.path.join(output_dir, "samples")
+    except subprocess.CalledProcessError as e:
+        print(f"Error al generar visualizaciones: {e}")
+        print(
+            "Esto puede ocurrir si las imágenes de prueba no están disponibles localmente."
+        )
+        return None
 
 
 def analyze_results(val_results_dir, test_results_dir):
@@ -157,28 +216,41 @@ def analyze_results(val_results_dir, test_results_dir):
     print("\n=== ANÁLISIS DE RESULTADOS ===")
 
     metrics = {}
+    found_results = False
 
     for split, result_file in result_files.items():
         if os.path.exists(result_file):
-            with open(result_file, "r") as f:
-                results = json.load(f)
+            found_results = True
+            try:
+                with open(result_file, "r") as f:
+                    results = json.load(f)
 
-            metrics[split] = {
-                "mAP50": results.get("metrics", {}).get("mAP50", 0),
-                "mAP50-95": results.get("metrics", {}).get("mAP50-95", 0),
-                "precision": results.get("metrics", {}).get("precision", 0),
-                "recall": results.get("metrics", {}).get("recall", 0),
-            }
+                metrics[split] = {
+                    "mAP50": results.get("metrics", {}).get("mAP50", 0),
+                    "mAP50-95": results.get("metrics", {}).get("mAP50-95", 0),
+                    "precision": results.get("metrics", {}).get("precision", 0),
+                    "recall": results.get("metrics", {}).get("recall", 0),
+                }
 
-            print(f"\nResultados en conjunto de {split.upper()}:")
-            print(f"- mAP@0.5: {metrics[split]['mAP50']:.4f}")
-            print(f"- mAP@0.5-0.95: {metrics[split]['mAP50-95']:.4f}")
-            print(f"- Precision: {metrics[split]['precision']:.4f}")
-            print(f"- Recall: {metrics[split]['recall']:.4f}")
+                print(f"\nResultados en conjunto de {split.upper()}:")
+                print(f"- mAP@0.5: {metrics[split]['mAP50']:.4f}")
+                print(f"- mAP@0.5-0.95: {metrics[split]['mAP50-95']:.4f}")
+                print(f"- Precision: {metrics[split]['precision']:.4f}")
+                print(f"- Recall: {metrics[split]['recall']:.4f}")
+            except Exception as e:
+                print(f"Error al leer los resultados para {split}: {e}")
         else:
             print(
                 f"No se encontró el archivo de resultados para {split}: {result_file}"
             )
+
+    if not found_results:
+        print(
+            "No se encontraron archivos de resultados. Esto puede deberse a que los datos no están disponibles localmente."
+        )
+        print(
+            "Asegúrese de que los datos estén descargados y en la ubicación correcta para obtener resultados."
+        )
 
     return metrics
 
@@ -281,22 +353,39 @@ def continue_training(
 
 def plot_metrics_comparison(metrics):
     """
-    Genera gráficas comparativas de las métricas entre validación y prueba.
+    Genera gráficas comparativas de las métricas entre los conjuntos de validación y prueba.
 
     Args:
-        metrics (dict): Diccionario con métricas de validación y prueba
+        metrics (dict): Diccionario con las métricas para cada conjunto
     """
-    if not metrics or "val" not in metrics or "test" not in metrics:
+    if not metrics or len(metrics) < 1:
         print("No hay suficientes datos para generar gráficas comparativas")
         return
 
-    # Configuración de la gráfica
+    # Verificar si tenemos métricas tanto para validación como para prueba
+    if "val" not in metrics or "test" not in metrics:
+        print(
+            "Faltan datos para validación o prueba, no se pueden generar gráficas comparativas"
+        )
+        return
+
+    # Verificar que tenemos todas las métricas necesarias
+    required_metrics = ["mAP50", "mAP50-95", "precision", "recall"]
+    for split in ["val", "test"]:
+        for metric in required_metrics:
+            if metric not in metrics[split]:
+                print(
+                    f"Falta la métrica {metric} para {split}, no se pueden generar gráficas comparativas"
+                )
+                return
+
+    # Crear una figura con 4 subplots (2x2)
     fig, axs = plt.subplots(2, 2, figsize=(12, 10))
     fig.suptitle("Comparación de Métricas entre Validación y Prueba", fontsize=16)
 
-    # Datos para graficar
-    splits = ["val", "test"]
-    colors = ["blue", "green"]
+    # Configurar colores y etiquetas
+    colors = ["#3498db", "#2ecc71"]  # Azul y verde
+    splits = ["Validación", "Prueba"]
 
     # Graficar mAP@0.5
     axs[0, 0].bar(
@@ -440,51 +529,74 @@ if __name__ == "__main__":
     print(f"Archivo de datos: {args.data}")
     print("-" * 50)
 
-    # Evaluar el modelo
-    val_dir, test_dir = evaluate_model(
-        model_path=args.model,
-        data_path=args.data,
-        batch_size=args.batch,
-        image_size=args.imgsz,
-        device=args.device,
-    )
-
-    # Visualizar algunas predicciones
-    vis_dir = visualize_predictions(
-        model_path=args.model,
-        data_path=args.data,
-        num_samples=args.samples,
-        image_size=args.imgsz,
-        device=args.device,
-    )
-
-    # Analizar resultados
-    metrics = analyze_results(val_dir, test_dir)
-
-    # Generar gráficas comparativas
-    plot_metrics_comparison(metrics)
-
-    # Continuar entrenamiento si se solicitó
-    if args.continue_epochs > 0:
-        new_model = continue_training(
+    try:
+        # Evaluar el modelo
+        val_dir, test_dir = evaluate_model(
             model_path=args.model,
             data_path=args.data,
-            epochs=args.continue_epochs,
             batch_size=args.batch,
             image_size=args.imgsz,
             device=args.device,
         )
 
-        if new_model:
-            print("\nEvaluar el modelo mejorado:")
-            print(
-                f"python {os.path.basename(__file__)} --model {new_model} --data {args.data}"
+        # Visualizar algunas predicciones
+        vis_dir = visualize_predictions(
+            model_path=args.model,
+            data_path=args.data,
+            num_samples=args.samples,
+            image_size=args.imgsz,
+            device=args.device,
+        )
+
+        # Analizar resultados
+        metrics = analyze_results(val_dir, test_dir)
+
+        # Generar gráficas comparativas si hay métricas disponibles
+        if metrics and len(metrics) > 0:
+            plot_metrics_comparison(metrics)
+        else:
+            print("\nNo hay suficientes datos para generar gráficas comparativas")
+
+        # Continuar entrenamiento si se solicitó
+        if args.continue_epochs > 0:
+            new_model = continue_training(
+                model_path=args.model,
+                data_path=args.data,
+                epochs=args.continue_epochs,
+                batch_size=args.batch,
+                image_size=args.imgsz,
+                device=args.device,
             )
 
-    print("\n=== PROCESO COMPLETO ===")
-    print(f"Resultados de validación: {val_dir}")
-    print(f"Resultados de prueba: {test_dir}")
-    print(f"Visualizaciones: {vis_dir}")
-    print(
-        "\nPara comparar con otros modelos o continuar entrenando, vuelva a ejecutar este script."
-    )
+            if new_model:
+                print("\nEvaluar el modelo mejorado:")
+                print(
+                    f"python {os.path.basename(__file__)} --model {new_model} --data {args.data}"
+                )
+
+        print("\n=== PROCESO COMPLETO ===")
+        print(f"Resultados de validación: {val_dir}")
+        print(f"Resultados de prueba: {test_dir}")
+        print(f"Visualizaciones: {vis_dir if vis_dir else 'No se pudieron generar'}")
+        print(
+            "\nPara comparar con otros modelos o continuar entrenando, vuelva a ejecutar este script."
+        )
+
+    except Exception as e:
+        print(f"\nError durante la evaluación: {e}")
+        print("\nRecomendaciones:")
+        print(
+            "1. Verifique que el dataset esté disponible localmente en la ruta especificada."
+        )
+        print(
+            "2. Si no tiene los datos localmente, descargue o genere el dataset con combineDatasets.py"
+        )
+        print("   python combineDatasets.py")
+        print("3. Asegúrese de tener instalado ultralytics:")
+        print("   pip install ultralytics")
+        print(
+            "4. Vuelva a intentar la evaluación con la ruta absoluta al directorio data:"
+        )
+        print(
+            f"   python evaluateModel.py --model {args.model} --data $(pwd)/data/data.yaml"
+        )

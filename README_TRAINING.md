@@ -35,6 +35,56 @@ pip install ultralytics pyyaml matplotlib
 
 ## Guía Completa del Proceso Iterativo
 
+### Paso 0: Preparar el Entorno Local (NUEVO)
+
+Si estás trabajando en un entorno local donde no tienes acceso a los datasets completos (por ejemplo, porque los generaste en un servidor), puedes usar el script `prepareLocalData.py` para crear una estructura mínima que permita evaluar modelos:
+
+```bash
+# Opción 1: Crear estructura mínima vacía
+python prepareLocalData.py
+
+# Opción 2: Importar datos desde un directorio existente
+python prepareLocalData.py --import-from /ruta/a/datos/originales
+```
+
+**Resultado esperado:**
+
+```
+Creando estructura mínima de dataset en: data
+
+Estructura de directorios creada:
+- data/
+  - train/
+    - images/
+    - labels/
+  - valid/
+    - images/
+    - labels/
+  - test/
+    - images/
+    - labels/
+
+Archivo data.yaml creado en: data/data.yaml
+
+La estructura está vacía (sin imágenes ni etiquetas).
+Esta estructura permite que el script evaluateModel.py se ejecute sin errores,
+aunque no es posible generar visualizaciones ni resultados reales sin datos.
+
+Próximos pasos:
+1. Para evaluación real, descargue los datos y ejecútelos a través de combineDatasets.py
+2. O coloque manualmente sus imágenes y etiquetas en los directorios correspondientes:
+   - Imágenes: data/test/images/ y data/valid/images/
+   - Etiquetas: data/test/labels/ y data/valid/labels/
+3. Para evaluar el modelo sin errores:
+   python evaluateModel.py --model runs/detect/train2/weights/best.pt --data $(pwd)/data/data.yaml
+```
+
+Este proceso te permite:
+
+- Evaluar modelos entrenados en servidores remotos
+- Ejecutar evaluaciones y continuación de entrenamiento sin errores
+- Trabajar con modelos sin necesidad de descargar todos los datos
+
 ### Paso 1: Combinar los Datasets
 
 El primer paso es combinar los tres datasets en una estructura unificada:
@@ -395,9 +445,13 @@ Resultados en conjunto de PRUEBA:
 
 Para obtener el mejor modelo posible, se recomienda este flujo de trabajo iterativo:
 
-1. **Preparación de datos**:
+1. **Preparación del entorno**:
 
    ```bash
+   # Si trabajas en entorno local sin datos completos
+   python prepareLocalData.py
+
+   # Si tienes acceso a los datasets completos
    python combineDatasets.py
    ```
 
@@ -462,3 +516,34 @@ Para obtener el mejor modelo posible, se recomienda este flujo de trabajo iterat
   - Si las métricas no mejoran después de 20-30 épocas, prueba ajustar la tasa de aprendizaje
   - Si hay muchos falsos positivos, verifica la calidad de las anotaciones
   - Si hay muchos falsos negativos, asegúrate de que el dataset incluye suficientes variaciones de placas
+
+### Trabajando con Entornos Locales y Remotos
+
+Este proyecto está diseñado para funcionar tanto en entornos de entrenamiento (con GPUs potentes y grandes datasets) como en máquinas locales (para evaluación y demostración):
+
+#### Flujo de Trabajo para Entornos Mixtos:
+
+1. **En servidor de entrenamiento**:
+
+   - Ejecutar `combineDatasets.py` para generar el dataset completo
+   - Entrenar con `trainYolov11s.py --device 0` (usando GPU)
+   - Evaluar el modelo con `evaluateModel.py`
+   - Guardar los mejores modelos (.pt)
+
+2. **Transferir a máquina local**:
+
+   - Transferir los modelos entrenados (.pt)
+   - Opcionalmente, transferir un pequeño subconjunto de imágenes para visualización
+
+3. **En máquina local**:
+   - Ejecutar `prepareLocalData.py` para crear la estructura mínima
+   - Evaluar con `evaluateModel.py --device cpu` (sin GPU)
+   - Visualizar resultados sin errores
+
+#### Recomendaciones para Máquinas sin GPUs:
+
+- Use lotes más pequeños: `--batch 4` o `--batch 8`
+- Para evaluación, use `--device cpu` para ejecutar en CPU
+- Ajuste `--samples` a un número pequeño (5-10) para visualizaciones rápidas
+
+Este enfoque permite un flujo de trabajo eficiente donde el entrenamiento intensivo se realiza en servidores, mientras que la evaluación y demostración pueden realizarse en cualquier máquina.

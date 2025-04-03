@@ -123,34 +123,85 @@ YOLO crea directorios con nombres incrementales para cada nueva ejecución de en
 
 ### Visión General del Proceso de Entrenamiento
 
-1. **Combinar conjuntos de datos**:
+1. **Preparar el entorno local (NUEVO)**:
+
+   ```bash
+   # Crear estructura local mínima para evaluación (si no tienes los datos completos)
+   python prepareLocalData.py
+
+   # O importar datos desde un directorio existente
+   python prepareLocalData.py --import-from /ruta/a/datos/existentes
+   ```
+
+2. **Combinar conjuntos de datos**:
 
    ```bash
    python combineDatasets.py
    ```
 
-2. **Entrenar el modelo**:
+3. **Entrenar el modelo**:
 
    ```bash
    python trainYolov11s.py --epochs 20 --batch 16 --device 0 --data $(pwd)/data/data.yaml
    ```
 
-3. **Evaluar el modelo**:
+4. **Evaluar el modelo**:
 
    ```bash
    python evaluateModel.py --model runs/detect/train/weights/best.pt --data $(pwd)/data/data.yaml
    ```
 
-4. **Continuar el entrenamiento (si es necesario)**:
+5. **Continuar el entrenamiento (si es necesario)**:
 
    ```bash
    python evaluateModel.py --model runs/detect/train/weights/best.pt --data $(pwd)/data/data.yaml --continue-epochs 20
    ```
 
-5. **Comparar modelos**:
+6. **Comparar modelos**:
    ```bash
    python evaluateModel.py --list-models
    ```
+
+### Trabajando con Datos Remotos y Locales (NUEVO)
+
+Este proyecto está diseñado para funcionar tanto en servidores de entrenamiento con conjuntos de datos completos como en máquinas locales para evaluación:
+
+1. **En servidores de entrenamiento**: Utiliza `combineDatasets.py` para generar el conjunto de datos completo y entrenar modelos.
+
+2. **En máquinas locales (sin datos completos)**:
+
+   - Utiliza `prepareLocalData.py` para crear una estructura mínima que permita evaluar modelos sin errores
+   - Si tienes acceso parcial a los datos, usa la opción `--import-from` para copiar una muestra representativa
+
+3. **Para transferir modelos entre entornos**:
+   - Entrena en el servidor con datos completos
+   - Transfiere los modelos (.pt) y una pequeña muestra de datos al entorno local
+   - Usa `evaluateModel.py` con el parámetro `--device cpu` para evaluación en máquinas sin GPU
+
+Este enfoque te permite entrenar en entornos potentes y evaluar/presentar resultados en cualquier máquina.
+
+### Script de Flujo de Trabajo Unificado (NUEVO)
+
+Para simplificar todo el proceso, hemos creado un script unificado `licensePlateWorkflow.py` que integra todas las herramientas:
+
+```bash
+# Ver todas las opciones disponibles
+python licensePlateWorkflow.py --help
+
+# Crear estructura local mínima para evaluación
+python licensePlateWorkflow.py prepare-local
+
+# Ejecutar el flujo de trabajo completo (local, CPU)
+python licensePlateWorkflow.py workflow --local --device cpu
+
+# Continuar entrenamiento de un modelo existente
+python licensePlateWorkflow.py continue-training runs/detect/train2/weights/best.pt --continue-epochs 20
+
+# Evaluar un modelo específico
+python licensePlateWorkflow.py evaluate --model runs/detect/train2/weights/best.pt --device cpu
+```
+
+Este script unifica todos los pasos del flujo de trabajo, proporciona mensajes de estado detallados y maneja errores de manera elegante.
 
 ## **Estructura de la Documentación**
 
