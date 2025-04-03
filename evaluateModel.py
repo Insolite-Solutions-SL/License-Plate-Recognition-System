@@ -192,29 +192,47 @@ def visualize_predictions(
         random.shuffle(image_files)
         samples = image_files[:num_samples]
 
-        # Usar el directorio de salida proporcionado
+        # Asegurarse de que el directorio de salida existe
         os.makedirs(output_dir, exist_ok=True)
 
         print(f"\n=== Generando visualizaciones para {len(samples)} imágenes ===")
 
-        # Crear directorio temporal para copiar las imágenes
-        with tempfile.TemporaryDirectory() as temp_dir:
+        # Usar un directorio temporal para las predicciones
+        with tempfile.TemporaryDirectory() as temp_images_dir:
             # Copiar las imágenes al directorio temporal
             for i, img_path in enumerate(samples):
-                temp_file = os.path.join(temp_dir, f"sample_{i}.jpg")
+                temp_file = os.path.join(temp_images_dir, f"sample_{i}.jpg")
                 shutil.copy(img_path, temp_file)
 
-            # Realizar predicciones usando la API
-            model.predict(
-                source=temp_dir,
-                imgsz=image_size,
-                device=device,
-                save=True,
-                save_txt=True,
-                save_conf=True,
-                project=os.path.dirname(output_dir),
-                name=os.path.basename(output_dir),
-            )
+            # Crear un directorio temporal para los resultados
+            with tempfile.TemporaryDirectory() as temp_results_dir:
+                # Realizar predicciones usando la API y guardar en el directorio temporal
+                results = model.predict(
+                    source=temp_images_dir,
+                    imgsz=image_size,
+                    device=device,
+                    save=True,
+                    save_txt=True,
+                    save_conf=True,
+                    project=temp_results_dir,
+                    name="temp_predictions",
+                )
+
+                # Directorio donde YOLO guardó los resultados
+                yolo_results_dir = os.path.join(temp_results_dir, "temp_predictions")
+
+                # Copiar todos los archivos generados al directorio de salida
+                for item in os.listdir(yolo_results_dir):
+                    src_path = os.path.join(yolo_results_dir, item)
+                    dst_path = os.path.join(output_dir, item)
+
+                    if os.path.isfile(src_path):
+                        shutil.copy2(src_path, dst_path)
+                    elif os.path.isdir(src_path):
+                        # Si el destino ya existe, eliminarlo primero para evitar errores
+                        if os.path.exists(dst_path):
+                            shutil.rmtree(dst_path)
+                        shutil.copytree(src_path, dst_path)
 
             print(f"Visualizaciones guardadas en: {output_dir}")
 
