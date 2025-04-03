@@ -1,18 +1,29 @@
 #!/usr/bin/env python
 import os
-import subprocess
 import argparse
 import glob
-import json
 import matplotlib.pyplot as plt
 import sys
-from pathlib import Path
-import re
+import tempfile
+import shutil
+import datetime
+import random
+import yaml
+import traceback
+
+# Intentar importar YOLO una sola vez
+try:
+    from ultralytics import YOLO
+
+    YOLO_AVAILABLE = True
+except ImportError:
+    YOLO_AVAILABLE = False
 
 
 def evaluate_model(model_path, data_path, batch_size=16, image_size=640, device="0"):
     """
     Evalúa un modelo YOLOv11 entrenado usando los conjuntos de validación y prueba.
+    Utiliza la API de Python de Ultralytics para obtener métricas precisas.
 
     Args:
         model_path (str): Ruta al archivo .pt del modelo
@@ -27,186 +38,104 @@ def evaluate_model(model_path, data_path, batch_size=16, image_size=640, device=
     if not os.path.exists(data_path):
         raise FileNotFoundError(f"No se encontró el archivo data.yaml en {data_path}")
 
-    # Verificar que los directorios de datos existen
-    # Leer la configuración de data.yaml
-    import yaml
+    # Verificar que YOLO está disponible
+    if not YOLO_AVAILABLE:
+        print("⚠️ Error: El módulo 'ultralytics' no está instalado.")
+        print("Instale ultralytics con: pip install ultralytics")
+        raise ImportError("Se requiere el módulo 'ultralytics' para evaluar el modelo")
 
+    # Usar la API de Python de Ultralytics
     try:
-        with open(data_path, "r") as f:
-            data_config = yaml.safe_load(f)
+        print("\n=== Evaluando modelo usando la API de Ultralytics ===")
+        print(f"Cargando modelo desde {model_path}...")
+        model = YOLO(model_path)
 
-        # Verificar si los directorios de imágenes existen
-        data_dir = os.path.dirname(data_path)
-        val_dir = os.path.join(data_dir, data_config.get("val", ""))
-        test_dir = os.path.join(data_dir, data_config.get("test", ""))
+        # Evaluar en conjunto de validación
+        print(f"\n=== Evaluando en conjunto de VALIDACIÓN ===")
+        val_metrics = model.val(
+            data=data_path,
+            batch=batch_size,
+            imgsz=image_size,
+            device=device,
+            save_json=True,
+            save_txt=True,
+            save_conf=True,
+            plots=True,
+        )
 
-        if not os.path.exists(val_dir):
-            print(f"ADVERTENCIA: No se encontró el directorio de validación: {val_dir}")
-            print(
-                "Es posible que la evaluación falle si los datos no están disponibles localmente."
-            )
+        # Extraer las métricas del objeto retornado
+        val_results = {
+            "mAP50": float(val_metrics.box.map50),
+            "mAP50-95": float(val_metrics.box.map),
+            "precision": float(val_metrics.box.precision),
+            "recall": float(val_metrics.box.recall),
+        }
 
-        if not os.path.exists(test_dir):
-            print(f"ADVERTENCIA: No se encontró el directorio de prueba: {test_dir}")
-            print(
-                "Es posible que la evaluación falle si los datos no están disponibles localmente."
-            )
+        # Obtener directorio de resultados
+        val_dir = (
+            val_metrics.save_dir
+            if hasattr(val_metrics, "save_dir")
+            else "./runs/detect/val"
+        )
+
+        print("\nMétricas de VALIDACIÓN:")
+        print(f"- mAP@0.5: {val_results['mAP50']:.4f}")
+        print(f"- mAP@0.5-0.95: {val_results['mAP50-95']:.4f}")
+        print(f"- Precision: {val_results['precision']:.4f}")
+        print(f"- Recall: {val_results['recall']:.4f}")
+        print(f"- Resultados guardados en: {val_dir}")
+
+        # Evaluar en conjunto de prueba
+        print(f"\n=== Evaluando en conjunto de PRUEBA ===")
+        test_metrics = model.val(
+            data=data_path,
+            split="test",
+            batch=batch_size,
+            imgsz=image_size,
+            device=device,
+            save_json=True,
+            save_txt=True,
+            save_conf=True,
+            name="test_results",
+            plots=True,
+        )
+
+        # Extraer las métricas del objeto retornado
+        test_results = {
+            "mAP50": float(test_metrics.box.map50),
+            "mAP50-95": float(test_metrics.box.map),
+            "precision": float(test_metrics.box.precision),
+            "recall": float(test_metrics.box.recall),
+        }
+
+        # Obtener directorio de resultados
+        test_dir = (
+            test_metrics.save_dir
+            if hasattr(test_metrics, "save_dir")
+            else "./runs/detect/test_results"
+        )
+
+        print("\nMétricas de PRUEBA:")
+        print(f"- mAP@0.5: {test_results['mAP50']:.4f}")
+        print(f"- mAP@0.5-0.95: {test_results['mAP50-95']:.4f}")
+        print(f"- Precision: {test_results['precision']:.4f}")
+        print(f"- Recall: {test_results['recall']:.4f}")
+        print(f"- Resultados guardados en: {test_dir}")
+
+        return val_dir, test_dir, val_results, test_results
+
     except Exception as e:
-        print(f"Error al leer la configuración del archivo data.yaml: {e}")
-        print(
-            "Continuando de todos modos, pero pueden ocurrir errores durante la evaluación."
-        )
-
-    # Nombre base para los directorios de resultados
-    model_name = os.path.basename(model_path).split(".")[0]
-    val_metrics = {}
-    test_metrics = {}
-
-    # 1. Evaluar en el conjunto de validación
-    print(f"\n=== Evaluando {model_name} en el conjunto de VALIDACIÓN ===")
-    val_cmd = [
-        "yolo",
-        "task=detect",
-        "mode=val",
-        f"model={model_path}",
-        f"data={data_path}",
-        f"batch={batch_size}",
-        f"imgsz={image_size}",
-        f"device={device}",
-        "save_json=True",
-        "save_txt=True",
-        "save_conf=True",
-        "plots=True",
-    ]
-
-    print(f"Ejecutando: {' '.join(val_cmd)}")
-    try:
-        val_output = subprocess.run(val_cmd, check=True, text=True, capture_output=True)
-        val_result = val_output.stdout
-
-        # Extraer métricas de la salida
-        val_metrics = extract_metrics_from_output(val_result)
-
-        # Buscar el directorio de salida en la consola
-        val_dir = "./runs/detect/val"
-        for line in val_result.split("\n"):
-            if "Results saved to" in line:
-                val_dir = line.split("Results saved to")[-1].strip()
-                break
-    except subprocess.CalledProcessError as e:
-        print(f"Error durante la evaluación en el conjunto de validación: {e}")
-        print(
-            "Esto puede ocurrir si los datos de validación no están disponibles localmente."
-        )
-
-    # 2. Evaluar en el conjunto de prueba
-    print(f"\n=== Evaluando {model_name} en el conjunto de PRUEBA ===")
-    test_cmd = [
-        "yolo",
-        "task=detect",
-        "mode=val",
-        f"model={model_path}",
-        f"data={data_path}",
-        "split=test",  # Especificar que se use el conjunto de prueba
-        f"batch={batch_size}",
-        f"imgsz={image_size}",
-        f"device={device}",
-        "save_json=True",
-        "save_txt=True",
-        "save_conf=True",
-        "name=test_results",
-        "plots=True",
-    ]
-
-    print(f"Ejecutando: {' '.join(test_cmd)}")
-    try:
-        test_output = subprocess.run(
-            test_cmd, check=True, text=True, capture_output=True
-        )
-        test_result = test_output.stdout
-
-        # Extraer métricas de la salida
-        test_metrics = extract_metrics_from_output(test_result)
-
-        # Buscar el directorio de salida en la consola
-        test_dir = "./runs/detect/test_results"
-        for line in test_result.split("\n"):
-            if "Results saved to" in line:
-                test_dir = line.split("Results saved to")[-1].strip()
-                break
-    except subprocess.CalledProcessError as e:
-        print(f"Error durante la evaluación en el conjunto de prueba: {e}")
-        print(
-            "Esto puede ocurrir si los datos de prueba no están disponibles localmente."
-        )
-
-    return val_dir, test_dir, val_metrics, test_metrics
-
-
-def extract_metrics_from_output(output_text):
-    """
-    Extrae métricas de la salida de consola de YOLO.
-
-    Args:
-        output_text (str): Texto completo de la salida de YOLO
-
-    Returns:
-        dict: Diccionario con las métricas extraídas
-    """
-    metrics = {"mAP50": 0.0, "mAP50-95": 0.0, "precision": 0.0, "recall": 0.0}
-
-    # Buscar la línea que contiene las métricas para "all"
-    for line in output_text.split("\n"):
-        if "all" in line and "images" in line:
-            parts = line.strip().split()
-            if len(parts) >= 8:
-                try:
-                    # Formato típico: "all  4011  4289  0.969  0.969  0.985  0.72"
-                    # La posición exacta puede variar, buscamos los valores después de "all"
-                    all_index = parts.index("all")
-                    if (
-                        len(parts) >= all_index + 7
-                    ):  # Asegurarse de que hay suficientes valores
-                        metrics["precision"] = float(parts[all_index + 3])
-                        metrics["recall"] = float(parts[all_index + 4])
-                        metrics["mAP50"] = float(parts[all_index + 5])
-                        metrics["mAP50-95"] = float(parts[all_index + 6])
-                        print(
-                            f"Métricas extraídas directamente de la salida: {metrics}"
-                        )
-                        return metrics
-                except (ValueError, IndexError) as e:
-                    print(f"Error al parsear la línea de métricas: {e}")
-                    continue
-
-    # Si llegamos aquí, intentamos un enfoque alternativo
-    try:
-        precision_matches = re.findall(r"Box\(P\s+([0-9.]+)", output_text)
-        recall_matches = re.findall(r"R\s+([0-9.]+)", output_text)
-        map50_matches = re.findall(r"mAP50\s+([0-9.]+)", output_text)
-        map_matches = re.findall(r"mAP50-95\s*:\s*[^0-9]*([0-9.]+)", output_text)
-
-        if precision_matches:
-            metrics["precision"] = float(precision_matches[-1])
-        if recall_matches:
-            metrics["recall"] = float(recall_matches[-1])
-        if map50_matches:
-            metrics["mAP50"] = float(map50_matches[-1])
-        if map_matches:
-            metrics["mAP50-95"] = float(map_matches[-1])
-
-        print(f"Métricas extraídas con expresiones regulares: {metrics}")
-    except Exception as e:
-        print(f"Error al extraer métricas con expresiones regulares: {e}")
-
-    return metrics
+        print(f"❌ Error durante la evaluación con API: {e}")
+        traceback.print_exc()
+        raise
 
 
 def visualize_predictions(
     model_path, data_path, num_samples=10, image_size=640, device="0"
 ):
     """
-    Visualiza predicciones en algunas imágenes aleatorias del conjunto de prueba.
+    Visualiza predicciones en algunas imágenes aleatorias del conjunto de prueba
+    usando la API de Ultralytics.
 
     Args:
         model_path (str): Ruta al archivo .pt del modelo
@@ -215,82 +144,71 @@ def visualize_predictions(
         image_size (int): Tamaño de las imágenes
         device (str): Dispositivo para inferencia
     """
-    # Obtener ruta al directorio de imágenes de prueba desde el archivo data.yaml
-    import yaml
-    import tempfile
-    import shutil
-    import datetime
-
-    with open(data_path, "r") as f:
-        data_config = yaml.safe_load(f)
-
-    # Normalizar la ruta del directorio de test eliminando ./ innecesarios
-    test_path = data_config["test"]
-    test_images_dir = os.path.normpath(
-        os.path.join(os.path.dirname(data_path), test_path)
-    )
-
-    # Listar todas las imágenes y seleccionar muestras aleatorias
-    image_files = []
-    for ext in ("*.jpg", "*.jpeg", "*.png", "*.bmp"):
-        image_files.extend(glob.glob(os.path.join(test_images_dir, ext)))
-
-    if not image_files:
-        print(f"No se encontraron imágenes en {test_images_dir}")
+    # Verificar que YOLO está disponible
+    if not YOLO_AVAILABLE:
+        print("⚠️ Error: El módulo 'ultralytics' no está instalado.")
+        print("Instale ultralytics con: pip install ultralytics")
         return None
 
-    # Seleccionar muestras aleatorias
-    import random
+    try:
+        print("\n=== Visualizando predicciones con API de Ultralytics ===")
 
-    random.shuffle(image_files)
-    samples = image_files[:num_samples]
+        # Cargar el modelo
+        model = YOLO(model_path)
 
-    # Extraer información del modelo para organización
-    model_dir = os.path.dirname(os.path.dirname(model_path))
-    train_name = os.path.basename(model_dir)
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        # Obtener ruta al directorio de imágenes de prueba
+        with open(data_path, "r") as f:
+            data_config = yaml.safe_load(f)
 
-    # Directorios organizados para las visualizaciones
-    # ./predictions_best/[train_name]/[timestamp]
-    prediction_base_dir = "./predictions_best"
-    output_dir = os.path.join(prediction_base_dir, train_name, timestamp)
+        # Normalizar la ruta del directorio de test
+        test_path = data_config["test"]
+        test_images_dir = os.path.normpath(
+            os.path.join(os.path.dirname(data_path), test_path)
+        )
 
-    os.makedirs(output_dir, exist_ok=True)
+        # Listar todas las imágenes y seleccionar muestras aleatorias
+        image_files = []
+        for ext in ("*.jpg", "*.jpeg", "*.png", "*.bmp"):
+            image_files.extend(glob.glob(os.path.join(test_images_dir, ext)))
 
-    print(
-        f"\n=== Generando visualizaciones de predicciones para {len(samples)} imágenes ==="
-    )
+        if not image_files:
+            print(f"No se encontraron imágenes en {test_images_dir}")
+            return None
 
-    # Crear un directorio temporal para copiar las muestras
-    with tempfile.TemporaryDirectory() as temp_dir:
-        # Copiar las imágenes seleccionadas al directorio temporal
-        temp_samples = []
-        for i, img_path in enumerate(samples):
-            # Crear nombre simple para el archivo temporal
-            temp_file = os.path.join(temp_dir, f"sample_{i}.jpg")
-            shutil.copy(img_path, temp_file)
-            temp_samples.append(temp_file)
+        # Seleccionar muestras aleatorias
+        random.shuffle(image_files)
+        samples = image_files[:num_samples]
 
-        # Ejecutar predicciones en las muestras del directorio temporal
-        predict_cmd = [
-            "yolo",
-            "task=detect",
-            "mode=predict",
-            f"model={model_path}",
-            f"source={temp_dir}",  # Usar el directorio temporal como fuente
-            f"imgsz={image_size}",
-            f"device={device}",
-            f"save=True",
-            f"save_txt=True",
-            f"save_conf=True",
-            f"project={prediction_base_dir}",
-            f"name={os.path.join(train_name, timestamp)}",
-        ]
+        # Preparar directorios para guardar las visualizaciones
+        model_dir = os.path.dirname(os.path.dirname(model_path))
+        train_name = os.path.basename(model_dir)
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
-        print(f"Ejecutando: {' '.join(predict_cmd)}")
+        prediction_base_dir = "./predictions_best"
+        output_dir = os.path.join(prediction_base_dir, train_name, timestamp)
+        os.makedirs(output_dir, exist_ok=True)
 
-        try:
-            subprocess.run(predict_cmd, check=True)
+        print(f"\n=== Generando visualizaciones para {len(samples)} imágenes ===")
+
+        # Crear directorio temporal para copiar las imágenes
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Copiar las imágenes al directorio temporal
+            for i, img_path in enumerate(samples):
+                temp_file = os.path.join(temp_dir, f"sample_{i}.jpg")
+                shutil.copy(img_path, temp_file)
+
+            # Realizar predicciones usando la API
+            model.predict(
+                source=temp_dir,
+                imgsz=image_size,
+                device=device,
+                save=True,
+                save_txt=True,
+                save_conf=True,
+                project=prediction_base_dir,
+                name=os.path.join(train_name, timestamp),
+            )
+
             print(f"Visualizaciones guardadas en: {output_dir}")
 
             # Crear un archivo README en el directorio de visualizaciones
@@ -303,331 +221,9 @@ def visualize_predictions(
                 f.write(f"Tamaño de imagen: {image_size}x{image_size}\n")
 
             return output_dir
-        except subprocess.CalledProcessError as e:
-            print(f"Error al generar visualizaciones: {e}")
-            print(
-                "Intente verificar manualmente las rutas de las imágenes en el conjunto de prueba."
-            )
-            return None
 
-
-def analyze_results(
-    val_results_dir, test_results_dir, val_metrics=None, test_metrics=None
-):
-    """
-    Analiza y muestra un resumen de los resultados de evaluación.
-
-    Args:
-        val_results_dir (str): Directorio base con resultados de validación
-        test_results_dir (str): Directorio base con resultados de prueba
-        val_metrics (dict): Métricas de validación precalculadas (opcional)
-        test_metrics (dict): Métricas de prueba precalculadas (opcional)
-    """
-    # Buscar los directorios de resultados más recientes
-    val_dirs = sorted(glob.glob(f"{val_results_dir}*"), key=os.path.getmtime)
-    test_dirs = sorted(glob.glob(f"{test_results_dir}*"), key=os.path.getmtime)
-
-    # Usar los directorios más recientes si existen
-    val_dir = val_dirs[-1] if val_dirs else val_results_dir
-    test_dir = test_dirs[-1] if test_dirs else test_results_dir
-
-    print("\n=== ANÁLISIS DE RESULTADOS ===")
-    print(f"Buscando resultados en:")
-    print(f" - Validación: {val_dir}/predictions.json")
-    print(f" - Prueba: {test_dir}/predictions.json")
-
-    # Si tenemos métricas precalculadas, usarlas
-    metrics = {}
-    found_results = False
-
-    if val_metrics and all(val_metrics.values()):
-        metrics["val"] = val_metrics
-        found_results = True
-        print("\nResultados en conjunto de VALIDACIÓN (extraídos de la consola):")
-        print(f"- mAP@0.5: {metrics['val']['mAP50']:.4f}")
-        print(f"- mAP@0.5-0.95: {metrics['val']['mAP50-95']:.4f}")
-        print(f"- Precision: {metrics['val']['precision']:.4f}")
-        print(f"- Recall: {metrics['val']['recall']:.4f}")
-
-    if test_metrics and all(test_metrics.values()):
-        metrics["test"] = test_metrics
-        found_results = True
-        print("\nResultados en conjunto de PRUEBA (extraídos de la consola):")
-        print(f"- mAP@0.5: {metrics['test']['mAP50']:.4f}")
-        print(f"- mAP@0.5-0.95: {metrics['test']['mAP50-95']:.4f}")
-        print(f"- Precision: {metrics['test']['precision']:.4f}")
-        print(f"- Recall: {metrics['test']['recall']:.4f}")
-
-    # Si no tenemos métricas precalculadas o son todas cero, intentar extraerlas de los archivos
-    if (
-        not found_results
-        or (val_metrics and not all(val_metrics.values()))
-        or (test_metrics and not all(test_metrics.values()))
-    ):
-        # Lista de posibles nombres de archivo para resultados
-        result_file_names = ["predictions.json", "results.json"]
-
-        for split, results_dir in [("val", val_dir), ("test", test_dir)]:
-            if split in metrics and all(metrics[split].values()):
-                continue  # Ya tenemos métricas válidas para este split
-
-            result_file = None
-            # Buscar cada posible nombre de archivo
-            for filename in result_file_names:
-                file_path = os.path.join(results_dir, filename)
-                if os.path.exists(file_path):
-                    result_file = file_path
-                    print(f"Encontrado archivo de resultados para {split}: {file_path}")
-                    break
-
-            if result_file:
-                # Intentar extraer métricas del archivo JSON
-                try:
-                    # Intentar extraer métricas del log o consola
-                    log_metrics = extract_metrics_from_console_output(results_dir)
-                    if log_metrics and any(log_metrics.values()):
-                        metrics[split] = log_metrics
-                        found_results = True
-                        print(
-                            f"\nResultados en conjunto de {split.upper()} (extraídos de logs):"
-                        )
-                        print(f"- mAP@0.5: {metrics[split]['mAP50']:.4f}")
-                        print(f"- mAP@0.5-0.95: {metrics[split]['mAP50-95']:.4f}")
-                        print(f"- Precision: {metrics[split]['precision']:.4f}")
-                        print(f"- Recall: {metrics[split]['recall']:.4f}")
-                except Exception as e:
-                    print(f"Error al extraer métricas de logs: {e}")
-            else:
-                print(
-                    f"No se encontró el archivo de resultados para {split}: {os.path.join(results_dir, 'predictions.json')}"
-                )
-                # Intentar extraer métricas de la salida de consola
-                log_metrics = extract_metrics_from_console_output(results_dir)
-                if log_metrics and any(log_metrics.values()):
-                    metrics[split] = log_metrics
-                    found_results = True
-                    print(
-                        f"\nResultados extraídos de la salida de consola para {split.upper()}:"
-                    )
-                    print(f"- mAP@0.5: {metrics[split]['mAP50']:.4f}")
-                    print(f"- mAP@0.5-0.95: {metrics[split]['mAP50-95']:.4f}")
-                    print(f"- Precision: {metrics[split]['precision']:.4f}")
-                    print(f"- Recall: {metrics[split]['recall']:.4f}")
-
-    if not found_results:
-        print(
-            "No se encontraron archivos de resultados. Buscando en otros directorios..."
-        )
-        # Buscar en cualquier directorio de val o test
-        all_val_dirs = glob.glob("./runs/detect/val*")
-        all_test_dirs = glob.glob("./runs/detect/test_results*")
-
-        if all_val_dirs or all_test_dirs:
-            print(
-                "Se encontraron los siguientes directorios que pueden contener resultados:"
-            )
-            for d in all_val_dirs:
-                print(f" - {d}")
-            for d in all_test_dirs:
-                print(f" - {d}")
-
-        # Si aún no se encuentran resultados, crear métricas basadas en la consola
-        metrics = create_default_metrics()
-        print("No hay suficientes datos para generar gráficas comparativas")
-
-    return metrics
-
-
-def extract_metrics_from_console_output(results_dir):
-    """
-    Extrae métricas de la salida de consola guardada en archivos de texto.
-
-    Args:
-        results_dir (str): Directorio donde buscar archivos con métricas
-
-    Returns:
-        dict: Diccionario con las métricas extraídas o valores por defecto
-    """
-    # Valores por defecto
-    metrics = {"mAP50": 0.0, "mAP50-95": 0.0, "precision": 0.0, "recall": 0.0}
-
-    # 1. Primero buscar en archivos de log
-    log_files = glob.glob(os.path.join(results_dir, "*.txt"))
-
-    for file in log_files:
-        try:
-            with open(file, "r") as f:
-                content = f.read()
-
-                # Buscar la línea con "all" que generalmente contiene las métricas
-                all_pattern = (
-                    r"all\s+\d+\s+\d+\s+([0-9.]+)\s+([0-9.]+)\s+([0-9.]+)\s+([0-9.]+)"
-                )
-                all_matches = re.search(all_pattern, content)
-
-                if all_matches:
-                    metrics["precision"] = float(all_matches.group(1))
-                    metrics["recall"] = float(all_matches.group(2))
-                    metrics["mAP50"] = float(all_matches.group(3))
-                    metrics["mAP50-95"] = float(all_matches.group(4))
-                    return metrics
-
-                # Enfoque alternativo: buscar métricas por separado
-                precision_matches = re.findall(r"Box\(P\s+([0-9.]+)", content)
-                recall_matches = re.findall(r"R\s+([0-9.]+)", content)
-                map50_matches = re.findall(r"mAP50\s+([0-9.]+)", content)
-                map_matches = re.findall(r"mAP50-95\s*:\s*[^0-9]*([0-9.]+)", content)
-
-                if precision_matches:
-                    metrics["precision"] = float(precision_matches[-1])
-                if recall_matches:
-                    metrics["recall"] = float(recall_matches[-1])
-                if map50_matches:
-                    metrics["mAP50"] = float(map50_matches[-1])
-                if map_matches:
-                    metrics["mAP50-95"] = float(map_matches[-1])
-
-                # Si hemos encontrado al menos algunas métricas, devolverlas
-                if any(metrics.values()):
-                    return metrics
-        except Exception as e:
-            print(f"Error al leer archivo de log {file}: {e}")
-
-    # 2. Determinar si es validación o prueba por el nombre del directorio
-    if "val" in os.path.basename(results_dir):
-        metrics = {
-            "mAP50": 0.985,
-            "mAP50-95": 0.720,
-            "precision": 0.969,
-            "recall": 0.969,
-        }
-    elif "test" in os.path.basename(results_dir):
-        metrics = {
-            "mAP50": 0.991,
-            "mAP50-95": 0.735,
-            "precision": 0.990,
-            "recall": 0.976,
-        }
-
-    return metrics
-
-
-def create_default_metrics():
-    """
-    Crea un conjunto de métricas por defecto basado en la salida de consola observada.
-
-    Returns:
-        dict: Diccionario con métricas por defecto
-    """
-    return {
-        "val": {
-            "mAP50": 0.985,
-            "mAP50-95": 0.720,
-            "precision": 0.969,
-            "recall": 0.969,
-        },
-        "test": {
-            "mAP50": 0.991,
-            "mAP50-95": 0.735,
-            "precision": 0.990,
-            "recall": 0.976,
-        },
-    }
-
-
-def continue_training(
-    model_path, data_path, epochs=20, batch_size=16, image_size=640, device="0"
-):
-    """
-    Continúa el entrenamiento desde un modelo previamente entrenado.
-
-    Args:
-        model_path (str): Ruta al modelo pre-entrenado para continuar
-        data_path (str): Ruta al archivo data.yaml
-        epochs (int): Número de épocas adicionales
-        batch_size (int): Tamaño del batch para entrenamiento
-        image_size (int): Tamaño de las imágenes
-        device (str): Dispositivo para entrenar
-    """
-    # Directorio de resultados basado en el nombre del modelo
-    model_name = os.path.basename(model_path).split(".")[0]
-    output_name = f"continue_{model_name}"
-
-    # Obtener una lista de directorios existentes antes del entrenamiento
-    existing_dirs = set(glob.glob("./runs/detect/*"))
-
-    # Comando para continuar el entrenamiento
-    train_cmd = [
-        "yolo",
-        "task=detect",
-        "mode=train",
-        f"model={model_path}",  # Usar el modelo existente como punto de partida
-        f"data={data_path}",
-        f"device={device}",
-        "save=True",
-        f"epochs={epochs}",
-        f"batch={batch_size}",
-        "val=True",
-        "plots=True",
-        f"imgsz={image_size}",
-        f"name={output_name}",
-    ]
-
-    print(
-        f"\n=== Continuando entrenamiento desde {model_path} por {epochs} épocas adicionales ==="
-    )
-    print(f"Ejecutando: {' '.join(train_cmd)}")
-
-    result = subprocess.run(train_cmd, capture_output=True, text=True)
-
-    # Analizamos la salida para encontrar el directorio donde se guardaron los resultados
-    output_lines = result.stdout.split("\n") if result.stdout else []
-
-    # Buscamos la línea que contiene "save_dir="
-    save_dir = None
-    for line in output_lines:
-        if "save_dir=" in line:
-            parts = line.strip().split()
-            for part in parts:
-                if part.startswith("save_dir="):
-                    save_dir = part.split("=")[1]
-                    break
-
-    # Si no encontramos el directorio en la salida, buscamos comparando los directorios antes y después
-    if not save_dir:
-        new_dirs = set(glob.glob("./runs/detect/*"))
-        added_dirs = new_dirs - existing_dirs
-
-        # Buscar directorios que coincidan con el patrón "continue_*"
-        continue_dirs = [
-            d for d in added_dirs if os.path.basename(d).startswith("continue_")
-        ]
-
-        if continue_dirs:
-            # Tomar el directorio más reciente
-            save_dir = max(continue_dirs, key=os.path.getmtime)
-        else:
-            # Si no encontramos nada, usar el nombre esperado
-            save_dir = f"./runs/detect/{output_name}"
-
-    # Ruta completa al modelo
-    best_weights = os.path.join(save_dir, "weights/best.pt")
-
-    if os.path.exists(best_weights):
-        print(
-            f"\nEntrenamiento adicional completado. Mejor modelo guardado en: {best_weights}"
-        )
-        return best_weights
-    else:
-        print(
-            f"\nNo se encontró el archivo de pesos después del entrenamiento adicional en: {best_weights}"
-        )
-        # Buscar en cualquier directorio de continue_ reciente
-        continue_models = glob.glob("./runs/detect/continue_*/weights/best.pt")
-        if continue_models:
-            newest_model = max(continue_models, key=os.path.getmtime)
-            print(f"Sin embargo, se encontró un modelo reciente en: {newest_model}")
-            return newest_model
+    except Exception as e:
+        print(f"❌ Error al generar visualizaciones: {e}")
         return None
 
 
@@ -638,7 +234,7 @@ def plot_metrics_comparison(metrics):
     Args:
         metrics (dict): Diccionario con las métricas para cada conjunto
     """
-    if not metrics or len(metrics) < 1:
+    if not metrics or len(metrics) < 2:
         print("No hay suficientes datos para generar gráficas comparativas")
         return
 
@@ -703,9 +299,75 @@ def plot_metrics_comparison(metrics):
     print("\nGráfica comparativa guardada como: metrics_comparison.png")
 
 
+def continue_training(
+    model_path, data_path, epochs=20, batch_size=16, image_size=640, device="0"
+):
+    """
+    Continúa el entrenamiento desde un modelo previamente entrenado
+    usando la API de Ultralytics.
+
+    Args:
+        model_path (str): Ruta al modelo pre-entrenado para continuar
+        data_path (str): Ruta al archivo data.yaml
+        epochs (int): Número de épocas adicionales
+        batch_size (int): Tamaño del batch para entrenamiento
+        image_size (int): Tamaño de las imágenes
+        device (str): Dispositivo para entrenar
+    """
+    # Verificar que YOLO está disponible
+    if not YOLO_AVAILABLE:
+        print("⚠️ Error: El módulo 'ultralytics' no está instalado.")
+        print("Instale ultralytics con: pip install ultralytics")
+        return None
+
+    try:
+        print(
+            f"\n=== Continuando entrenamiento desde {model_path} por {epochs} épocas adicionales ==="
+        )
+
+        # Cargar el modelo
+        model = YOLO(model_path)
+
+        # Continuar entrenamiento
+        results = model.train(
+            data=data_path,
+            epochs=epochs,
+            batch=batch_size,
+            imgsz=image_size,
+            device=device,
+            resume=True,
+        )
+
+        # Obtener la ruta al mejor modelo
+        if hasattr(results, "best") and os.path.exists(results.best):
+            best_model = results.best
+        else:
+            # Buscar el mejor modelo
+            model_dir = (
+                results.save_dir
+                if hasattr(results, "save_dir")
+                else f"./runs/detect/train{epochs}"
+            )
+            best_model = os.path.join(model_dir, "weights/best.pt")
+
+        if os.path.exists(best_model):
+            print(
+                f"\nEntrenamiento adicional completado. Mejor modelo guardado en: {best_model}"
+            )
+            return best_model
+        else:
+            print(f"\nNo se encontró el mejor modelo en la ruta esperada: {best_model}")
+            return None
+
+    except Exception as e:
+        print(f"❌ Error durante el entrenamiento: {e}")
+        return None
+
+
 def find_best_models():
     """
     Busca y lista los mejores modelos disponibles en el directorio runs/detect.
+    Usa la API de Ultralytics para evaluar los modelos si está disponible.
     """
     model_dirs = glob.glob("./runs/detect/train*")
     model_dirs.extend(glob.glob("./runs/detect/continue_*"))
@@ -715,8 +377,7 @@ def find_best_models():
     for model_dir in model_dirs:
         best_model = os.path.join(model_dir, "weights/best.pt")
         if os.path.exists(best_model):
-            # Intentar obtener el rendimiento del modelo
-            results_file = os.path.join(model_dir, "results.json")
+            # Crear la información del modelo
             model_info = {
                 "path": best_model,
                 "name": os.path.basename(model_dir),
@@ -724,16 +385,22 @@ def find_best_models():
                 "mAP50-95": "N/A",
             }
 
-            if os.path.exists(results_file):
+            # Intentar evaluar el modelo para obtener métricas si YOLO está disponible
+            if YOLO_AVAILABLE:
                 try:
-                    with open(results_file, "r") as f:
-                        results = json.load(f)
-                    model_info["mAP50"] = results.get("metrics", {}).get("mAP50", "N/A")
-                    model_info["mAP50-95"] = results.get("metrics", {}).get(
-                        "mAP50-95", "N/A"
-                    )
-                except:
-                    pass
+                    # Cargar modelo
+                    model = YOLO(best_model)
+
+                    # Evaluar brevemente para obtener métricas
+                    metrics = model.val(verbose=False)
+                    model_info["mAP50"] = f"{float(metrics.box.map50):.4f}"
+                    model_info["mAP50-95"] = f"{float(metrics.box.map):.4f}"
+                except Exception as e:
+                    print(f"No se pudo evaluar el modelo {best_model}: {e}")
+            else:
+                print(
+                    "⚠️ Ultralytics no está instalado. No se pueden evaluar los modelos automáticamente."
+                )
 
             models.append(model_info)
 
@@ -828,8 +495,8 @@ if __name__ == "__main__":
             device=args.device,
         )
 
-        # Analizar resultados
-        metrics = analyze_results(val_dir, test_dir, val_metrics, test_metrics)
+        # Crear un diccionario de métricas para análisis
+        metrics = {"val": val_metrics, "test": test_metrics}
 
         # Generar gráficas comparativas si hay métricas disponibles
         if metrics and len(metrics) > 0:
