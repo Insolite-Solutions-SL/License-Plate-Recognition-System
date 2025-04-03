@@ -131,21 +131,17 @@ def visualize_predictions(
     """
     # Obtener ruta al directorio de imágenes de prueba desde el archivo data.yaml
     import yaml
+    import tempfile
+    import shutil
 
     with open(data_path, "r") as f:
         data_config = yaml.safe_load(f)
 
-    test_images_dir = os.path.join(os.path.dirname(data_path), data_config["test"])
-
-    # Verificar si el directorio existe
-    if not os.path.exists(test_images_dir):
-        print(
-            f"ERROR: No se encontró el directorio de imágenes de prueba: {test_images_dir}"
-        )
-        print(
-            "Saltando visualización de predicciones ya que las imágenes no están disponibles localmente."
-        )
-        return None
+    # Normalizar la ruta del directorio de test eliminando ./ innecesarios
+    test_path = data_config["test"]
+    test_images_dir = os.path.normpath(
+        os.path.join(os.path.dirname(data_path), test_path)
+    )
 
     # Listar todas las imágenes y seleccionar muestras aleatorias
     image_files = []
@@ -154,7 +150,7 @@ def visualize_predictions(
 
     if not image_files:
         print(f"No se encontraron imágenes en {test_images_dir}")
-        return None
+        return
 
     # Seleccionar muestras aleatorias
     import random
@@ -166,37 +162,50 @@ def visualize_predictions(
     output_dir = f"./predictions_{os.path.basename(model_path).split('.')[0]}"
     os.makedirs(output_dir, exist_ok=True)
 
-    # Ejecutar predicciones en muestras seleccionadas
-    predict_cmd = [
-        "yolo",
-        "task=detect",
-        "mode=predict",
-        f"model={model_path}",
-        f"source={','.join(samples)}",
-        f"imgsz={image_size}",
-        f"device={device}",
-        f"save=True",
-        f"save_txt=True",
-        f"save_conf=True",
-        f"project={output_dir}",
-        "name=samples",
-    ]
+    # Crear un directorio temporal para copiar las muestras
+    # Esto evita problemas con rutas largas o caracteres especiales
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Copiar las imágenes seleccionadas al directorio temporal
+        temp_samples = []
+        for i, img_path in enumerate(samples):
+            # Crear nombre simple para el archivo temporal
+            temp_file = os.path.join(temp_dir, f"sample_{i}.jpg")
+            shutil.copy(img_path, temp_file)
+            temp_samples.append(temp_file)
 
-    print(
-        f"\n=== Generando visualizaciones de predicciones para {len(samples)} imágenes ==="
-    )
-    print(f"Ejecutando: {' '.join(predict_cmd)}")
+        # Ejecutar predicciones en las muestras del directorio temporal
+        predict_cmd = [
+            "yolo",
+            "task=detect",
+            "mode=predict",
+            f"model={model_path}",
+            f"source={temp_dir}",  # Usar el directorio temporal como fuente
+            f"imgsz={image_size}",
+            f"device={device}",
+            f"save=True",
+            f"save_txt=True",
+            f"save_conf=True",
+            f"project={output_dir}",
+            "name=samples",
+        ]
 
-    try:
-        subprocess.run(predict_cmd, check=True)
-        print(f"Visualizaciones guardadas en: {os.path.join(output_dir, 'samples')}")
-        return os.path.join(output_dir, "samples")
-    except subprocess.CalledProcessError as e:
-        print(f"Error al generar visualizaciones: {e}")
         print(
-            "Esto puede ocurrir si las imágenes de prueba no están disponibles localmente."
+            f"\n=== Generando visualizaciones de predicciones para {len(samples)} imágenes ==="
         )
-        return None
+        print(f"Ejecutando: {' '.join(predict_cmd)}")
+
+        try:
+            subprocess.run(predict_cmd, check=True)
+            print(
+                f"Visualizaciones guardadas en: {os.path.join(output_dir, 'samples')}"
+            )
+            return os.path.join(output_dir, "samples")
+        except subprocess.CalledProcessError as e:
+            print(f"Error al generar visualizaciones: {e}")
+            print(
+                "Intente verificar manualmente las rutas de las imágenes en el conjunto de prueba."
+            )
+            return None
 
 
 def analyze_results(val_results_dir, test_results_dir):
@@ -204,16 +213,28 @@ def analyze_results(val_results_dir, test_results_dir):
     Analiza y muestra un resumen de los resultados de evaluación.
 
     Args:
-        val_results_dir (str): Directorio con resultados de validación
-        test_results_dir (str): Directorio con resultados de prueba
+        val_results_dir (str): Directorio base con resultados de validación
+        test_results_dir (str): Directorio base con resultados de prueba
     """
+    # Buscar los directorios de resultados más recientes
+    val_dirs = sorted(glob.glob(f"{val_results_dir}*"), key=os.path.getmtime)
+    test_dirs = sorted(glob.glob(f"{test_results_dir}*"), key=os.path.getmtime)
+
+    # Usar los directorios más recientes si existen
+    val_dir = val_dirs[-1] if val_dirs else val_results_dir
+    test_dir = test_dirs[-1] if test_dirs else test_results_dir
+
     # Buscar archivos de resultados JSON
     result_files = {
-        "val": os.path.join(val_results_dir, "results.json"),
-        "test": os.path.join(test_results_dir, "results.json"),
+        "val": os.path.join(val_dir, "results.json"),
+        "test": os.path.join(test_dir, "results.json"),
     }
 
     print("\n=== ANÁLISIS DE RESULTADOS ===")
+
+    print(f"Buscando resultados en:")
+    print(f" - Validación: {result_files['val']}")
+    print(f" - Prueba: {result_files['test']}")
 
     metrics = {}
     found_results = False
@@ -221,28 +242,78 @@ def analyze_results(val_results_dir, test_results_dir):
     for split, result_file in result_files.items():
         if os.path.exists(result_file):
             found_results = True
-            try:
+            with open(result_file, "r") as f:
+                results = json.load(f)
+
+            metrics[split] = {
+                "mAP50": results.get("metrics", {}).get("mAP50", 0),
+                "mAP50-95": results.get("metrics", {}).get("mAP50-95", 0),
+                "precision": results.get("metrics", {}).get("precision", 0),
+                "recall": results.get("metrics", {}).get("recall", 0),
+            }
+
+            print(f"\nResultados en conjunto de {split.upper()}:")
+            print(f"- mAP@0.5: {metrics[split]['mAP50']:.4f}")
+            print(f"- mAP@0.5-0.95: {metrics[split]['mAP50-95']:.4f}")
+            print(f"- Precision: {metrics[split]['precision']:.4f}")
+            print(f"- Recall: {metrics[split]['recall']:.4f}")
+        else:
+            print(
+                f"No se encontró el archivo de resultados para {split}: {result_file}"
+            )
+
+    if not found_results:
+        print(
+            "No se encontraron archivos de resultados. Buscando en otros directorios..."
+        )
+
+        # Buscar todos los posibles resultados en el directorio runs/detect
+        all_val_dirs = glob.glob("./runs/detect/val*")
+        all_test_dirs = glob.glob("./runs/detect/test_results*")
+
+        for val_dir in sorted(all_val_dirs, key=os.path.getmtime, reverse=True):
+            result_file = os.path.join(val_dir, "results.json")
+            if os.path.exists(result_file):
+                print(f"Encontrado resultado de validación en: {result_file}")
                 with open(result_file, "r") as f:
                     results = json.load(f)
 
-                metrics[split] = {
+                metrics["val"] = {
                     "mAP50": results.get("metrics", {}).get("mAP50", 0),
                     "mAP50-95": results.get("metrics", {}).get("mAP50-95", 0),
                     "precision": results.get("metrics", {}).get("precision", 0),
                     "recall": results.get("metrics", {}).get("recall", 0),
                 }
 
-                print(f"\nResultados en conjunto de {split.upper()}:")
-                print(f"- mAP@0.5: {metrics[split]['mAP50']:.4f}")
-                print(f"- mAP@0.5-0.95: {metrics[split]['mAP50-95']:.4f}")
-                print(f"- Precision: {metrics[split]['precision']:.4f}")
-                print(f"- Recall: {metrics[split]['recall']:.4f}")
-            except Exception as e:
-                print(f"Error al leer los resultados para {split}: {e}")
-        else:
-            print(
-                f"No se encontró el archivo de resultados para {split}: {result_file}"
-            )
+                print(f"\nResultados en conjunto de VALIDACIÓN (de {val_dir}):")
+                print(f"- mAP@0.5: {metrics['val']['mAP50']:.4f}")
+                print(f"- mAP@0.5-0.95: {metrics['val']['mAP50-95']:.4f}")
+                print(f"- Precision: {metrics['val']['precision']:.4f}")
+                print(f"- Recall: {metrics['val']['recall']:.4f}")
+                found_results = True
+                break
+
+        for test_dir in sorted(all_test_dirs, key=os.path.getmtime, reverse=True):
+            result_file = os.path.join(test_dir, "results.json")
+            if os.path.exists(result_file):
+                print(f"Encontrado resultado de prueba en: {result_file}")
+                with open(result_file, "r") as f:
+                    results = json.load(f)
+
+                metrics["test"] = {
+                    "mAP50": results.get("metrics", {}).get("mAP50", 0),
+                    "mAP50-95": results.get("metrics", {}).get("mAP50-95", 0),
+                    "precision": results.get("metrics", {}).get("precision", 0),
+                    "recall": results.get("metrics", {}).get("recall", 0),
+                }
+
+                print(f"\nResultados en conjunto de PRUEBA (de {test_dir}):")
+                print(f"- mAP@0.5: {metrics['test']['mAP50']:.4f}")
+                print(f"- mAP@0.5-0.95: {metrics['test']['mAP50-95']:.4f}")
+                print(f"- Precision: {metrics['test']['precision']:.4f}")
+                print(f"- Recall: {metrics['test']['recall']:.4f}")
+                found_results = True
+                break
 
     if not found_results:
         print(
@@ -251,6 +322,7 @@ def analyze_results(val_results_dir, test_results_dir):
         print(
             "Asegúrese de que los datos estén descargados y en la ubicación correcta para obtener resultados."
         )
+        return None
 
     return metrics
 
