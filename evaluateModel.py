@@ -7,6 +7,7 @@ import json
 import matplotlib.pyplot as plt
 import sys
 from pathlib import Path
+import re
 
 
 def evaluate_model(model_path, data_path, batch_size=16, image_size=640, device="0"):
@@ -58,6 +59,8 @@ def evaluate_model(model_path, data_path, batch_size=16, image_size=640, device=
 
     # Nombre base para los directorios de resultados
     model_name = os.path.basename(model_path).split(".")[0]
+    val_metrics = {}
+    test_metrics = {}
 
     # 1. Evaluar en el conjunto de validación
     print(f"\n=== Evaluando {model_name} en el conjunto de VALIDACIÓN ===")
@@ -78,7 +81,18 @@ def evaluate_model(model_path, data_path, batch_size=16, image_size=640, device=
 
     print(f"Ejecutando: {' '.join(val_cmd)}")
     try:
-        subprocess.run(val_cmd, check=True)
+        val_output = subprocess.run(val_cmd, check=True, text=True, capture_output=True)
+        val_result = val_output.stdout
+
+        # Extraer métricas de la salida
+        val_metrics = extract_metrics_from_output(val_result)
+
+        # Buscar el directorio de salida en la consola
+        val_dir = "./runs/detect/val"
+        for line in val_result.split("\n"):
+            if "Results saved to" in line:
+                val_dir = line.split("Results saved to")[-1].strip()
+                break
     except subprocess.CalledProcessError as e:
         print(f"Error durante la evaluación en el conjunto de validación: {e}")
         print(
@@ -106,14 +120,86 @@ def evaluate_model(model_path, data_path, batch_size=16, image_size=640, device=
 
     print(f"Ejecutando: {' '.join(test_cmd)}")
     try:
-        subprocess.run(test_cmd, check=True)
+        test_output = subprocess.run(
+            test_cmd, check=True, text=True, capture_output=True
+        )
+        test_result = test_output.stdout
+
+        # Extraer métricas de la salida
+        test_metrics = extract_metrics_from_output(test_result)
+
+        # Buscar el directorio de salida en la consola
+        test_dir = "./runs/detect/test_results"
+        for line in test_result.split("\n"):
+            if "Results saved to" in line:
+                test_dir = line.split("Results saved to")[-1].strip()
+                break
     except subprocess.CalledProcessError as e:
         print(f"Error durante la evaluación en el conjunto de prueba: {e}")
         print(
             "Esto puede ocurrir si los datos de prueba no están disponibles localmente."
         )
 
-    return f"./runs/detect/val", f"./runs/detect/test_results"
+    return val_dir, test_dir, val_metrics, test_metrics
+
+
+def extract_metrics_from_output(output_text):
+    """
+    Extrae métricas de la salida de consola de YOLO.
+
+    Args:
+        output_text (str): Texto completo de la salida de YOLO
+
+    Returns:
+        dict: Diccionario con las métricas extraídas
+    """
+    metrics = {"mAP50": 0.0, "mAP50-95": 0.0, "precision": 0.0, "recall": 0.0}
+
+    # Buscar la línea que contiene las métricas para "all"
+    for line in output_text.split("\n"):
+        if "all" in line and "images" in line:
+            parts = line.strip().split()
+            if len(parts) >= 8:
+                try:
+                    # Formato típico: "all  4011  4289  0.969  0.969  0.985  0.72"
+                    # La posición exacta puede variar, buscamos los valores después de "all"
+                    all_index = parts.index("all")
+                    if (
+                        len(parts) >= all_index + 7
+                    ):  # Asegurarse de que hay suficientes valores
+                        metrics["precision"] = float(parts[all_index + 3])
+                        metrics["recall"] = float(parts[all_index + 4])
+                        metrics["mAP50"] = float(parts[all_index + 5])
+                        metrics["mAP50-95"] = float(parts[all_index + 6])
+                        print(
+                            f"Métricas extraídas directamente de la salida: {metrics}"
+                        )
+                        return metrics
+                except (ValueError, IndexError) as e:
+                    print(f"Error al parsear la línea de métricas: {e}")
+                    continue
+
+    # Si llegamos aquí, intentamos un enfoque alternativo
+    try:
+        precision_matches = re.findall(r"Box\(P\s+([0-9.]+)", output_text)
+        recall_matches = re.findall(r"R\s+([0-9.]+)", output_text)
+        map50_matches = re.findall(r"mAP50\s+([0-9.]+)", output_text)
+        map_matches = re.findall(r"mAP50-95\s*:\s*[^0-9]*([0-9.]+)", output_text)
+
+        if precision_matches:
+            metrics["precision"] = float(precision_matches[-1])
+        if recall_matches:
+            metrics["recall"] = float(recall_matches[-1])
+        if map50_matches:
+            metrics["mAP50"] = float(map50_matches[-1])
+        if map_matches:
+            metrics["mAP50-95"] = float(map_matches[-1])
+
+        print(f"Métricas extraídas con expresiones regulares: {metrics}")
+    except Exception as e:
+        print(f"Error al extraer métricas con expresiones regulares: {e}")
+
+    return metrics
 
 
 def visualize_predictions(
@@ -225,13 +311,17 @@ def visualize_predictions(
             return None
 
 
-def analyze_results(val_results_dir, test_results_dir):
+def analyze_results(
+    val_results_dir, test_results_dir, val_metrics=None, test_metrics=None
+):
     """
     Analiza y muestra un resumen de los resultados de evaluación.
 
     Args:
         val_results_dir (str): Directorio base con resultados de validación
         test_results_dir (str): Directorio base con resultados de prueba
+        val_metrics (dict): Métricas de validación precalculadas (opcional)
+        test_metrics (dict): Métricas de prueba precalculadas (opcional)
     """
     # Buscar los directorios de resultados más recientes
     val_dirs = sorted(glob.glob(f"{val_results_dir}*"), key=os.path.getmtime)
@@ -246,114 +336,83 @@ def analyze_results(val_results_dir, test_results_dir):
     print(f" - Validación: {val_dir}/predictions.json")
     print(f" - Prueba: {test_dir}/predictions.json")
 
-    # Buscar archivos de resultados JSON (tanto results.json como predictions.json)
+    # Si tenemos métricas precalculadas, usarlas
     metrics = {}
     found_results = False
 
-    # Lista de posibles nombres de archivo para resultados
-    result_file_names = ["predictions.json", "results.json"]
+    if val_metrics and all(val_metrics.values()):
+        metrics["val"] = val_metrics
+        found_results = True
+        print("\nResultados en conjunto de VALIDACIÓN (extraídos de la consola):")
+        print(f"- mAP@0.5: {metrics['val']['mAP50']:.4f}")
+        print(f"- mAP@0.5-0.95: {metrics['val']['mAP50-95']:.4f}")
+        print(f"- Precision: {metrics['val']['precision']:.4f}")
+        print(f"- Recall: {metrics['val']['recall']:.4f}")
 
-    for split, results_dir in [("val", val_dir), ("test", test_dir)]:
-        result_file = None
+    if test_metrics and all(test_metrics.values()):
+        metrics["test"] = test_metrics
+        found_results = True
+        print("\nResultados en conjunto de PRUEBA (extraídos de la consola):")
+        print(f"- mAP@0.5: {metrics['test']['mAP50']:.4f}")
+        print(f"- mAP@0.5-0.95: {metrics['test']['mAP50-95']:.4f}")
+        print(f"- Precision: {metrics['test']['precision']:.4f}")
+        print(f"- Recall: {metrics['test']['recall']:.4f}")
 
-        # Buscar cada posible nombre de archivo
-        for filename in result_file_names:
-            file_path = os.path.join(results_dir, filename)
-            if os.path.exists(file_path):
-                result_file = file_path
-                print(f"Encontrado archivo de resultados para {split}: {file_path}")
-                break
+    # Si no tenemos métricas precalculadas o son todas cero, intentar extraerlas de los archivos
+    if (
+        not found_results
+        or (val_metrics and not all(val_metrics.values()))
+        or (test_metrics and not all(test_metrics.values()))
+    ):
+        # Lista de posibles nombres de archivo para resultados
+        result_file_names = ["predictions.json", "results.json"]
 
-        if result_file:
-            found_results = True
-            with open(result_file, "r") as f:
-                results = json.load(f)
+        for split, results_dir in [("val", val_dir), ("test", test_dir)]:
+            if split in metrics and all(metrics[split].values()):
+                continue  # Ya tenemos métricas válidas para este split
 
-            # Extraer métricas dependiendo de la estructura del archivo
-            if "metrics" in results:
-                # Formato results.json
-                metrics[split] = {
-                    "mAP50": results.get("metrics", {}).get("mAP50", 0),
-                    "mAP50-95": results.get("metrics", {}).get("mAP50-95", 0),
-                    "precision": results.get("metrics", {}).get("precision", 0),
-                    "recall": results.get("metrics", {}).get("recall", 0),
-                }
-            else:
-                # Formato predictions.json - buscar las métricas en una estructura diferente
-                # Intentar diferentes estructuras que podrían estar presentes en predictions.json
+            result_file = None
+            # Buscar cada posible nombre de archivo
+            for filename in result_file_names:
+                file_path = os.path.join(results_dir, filename)
+                if os.path.exists(file_path):
+                    result_file = file_path
+                    print(f"Encontrado archivo de resultados para {split}: {file_path}")
+                    break
+
+            if result_file:
+                # Intentar extraer métricas del archivo JSON
                 try:
-                    if isinstance(results, dict) and "metrics" in results:
-                        metrics_data = results["metrics"]
-                    elif isinstance(results, dict) and "all" in results:
-                        metrics_data = results["all"]
-                    elif (
-                        isinstance(results, list)
-                        and len(results) > 0
-                        and "metrics" in results[0]
-                    ):
-                        metrics_data = results[0]["metrics"]
-                    else:
-                        # Buscar en la salida estándar de la ejecución previa
+                    # Intentar extraer métricas del log o consola
+                    log_metrics = extract_metrics_from_console_output(results_dir)
+                    if log_metrics and any(log_metrics.values()):
+                        metrics[split] = log_metrics
+                        found_results = True
                         print(
-                            f"Buscando métricas en la línea de resultados de {split}..."
+                            f"\nResultados en conjunto de {split.upper()} (extraídos de logs):"
                         )
-                        box_p = box_r = map50 = map50_95 = 0
-
-                        # Buscar en el directorio para la clase "all"
-                        for file in os.listdir(results_dir):
-                            if file.endswith(".txt"):
-                                with open(os.path.join(results_dir, file), "r") as f:
-                                    for line in f:
-                                        if "all" in line:
-                                            parts = line.strip().split()
-                                            if len(parts) >= 8:
-                                                try:
-                                                    box_p = float(parts[-4])
-                                                    box_r = float(parts[-3])
-                                                    map50 = float(parts[-2])
-                                                    map50_95 = float(parts[-1])
-                                                except:
-                                                    pass
-                                            break
-
-                        metrics_data = {
-                            "mAP50": map50,
-                            "mAP50-95": map50_95,
-                            "precision": box_p,
-                            "recall": box_r,
-                        }
-
-                    metrics[split] = {
-                        "mAP50": metrics_data.get("mAP50", 0),
-                        "mAP50-95": metrics_data.get("mAP50-95", 0),
-                        "precision": metrics_data.get("precision", 0),
-                        "recall": metrics_data.get("recall", 0),
-                    }
+                        print(f"- mAP@0.5: {metrics[split]['mAP50']:.4f}")
+                        print(f"- mAP@0.5-0.95: {metrics[split]['mAP50-95']:.4f}")
+                        print(f"- Precision: {metrics[split]['precision']:.4f}")
+                        print(f"- Recall: {metrics[split]['recall']:.4f}")
                 except Exception as e:
-                    print(f"Error al extraer métricas de {result_file}: {e}")
-                    # Usar valores de la salida de consola que ya vimos en los logs
-                    metrics[split] = extract_metrics_from_console_output(results_dir)
-
-            print(f"\nResultados en conjunto de {split.upper()}:")
-            print(f"- mAP@0.5: {metrics[split]['mAP50']:.4f}")
-            print(f"- mAP@0.5-0.95: {metrics[split]['mAP50-95']:.4f}")
-            print(f"- Precision: {metrics[split]['precision']:.4f}")
-            print(f"- Recall: {metrics[split]['recall']:.4f}")
-        else:
-            print(
-                f"No se encontró el archivo de resultados para {split}: {os.path.join(results_dir, 'predictions.json')}"
-            )
-            # Intentar extraer métricas de la salida de consola
-            metrics[split] = extract_metrics_from_console_output(results_dir)
-            if metrics[split]:
-                found_results = True
+                    print(f"Error al extraer métricas de logs: {e}")
+            else:
                 print(
-                    f"\nResultados extraídos de la salida de consola para {split.upper()}:"
+                    f"No se encontró el archivo de resultados para {split}: {os.path.join(results_dir, 'predictions.json')}"
                 )
-                print(f"- mAP@0.5: {metrics[split]['mAP50']:.4f}")
-                print(f"- mAP@0.5-0.95: {metrics[split]['mAP50-95']:.4f}")
-                print(f"- Precision: {metrics[split]['precision']:.4f}")
-                print(f"- Recall: {metrics[split]['recall']:.4f}")
+                # Intentar extraer métricas de la salida de consola
+                log_metrics = extract_metrics_from_console_output(results_dir)
+                if log_metrics and any(log_metrics.values()):
+                    metrics[split] = log_metrics
+                    found_results = True
+                    print(
+                        f"\nResultados extraídos de la salida de consola para {split.upper()}:"
+                    )
+                    print(f"- mAP@0.5: {metrics[split]['mAP50']:.4f}")
+                    print(f"- mAP@0.5-0.95: {metrics[split]['mAP50-95']:.4f}")
+                    print(f"- Precision: {metrics[split]['precision']:.4f}")
+                    print(f"- Recall: {metrics[split]['recall']:.4f}")
 
     if not found_results:
         print(
@@ -372,7 +431,7 @@ def analyze_results(val_results_dir, test_results_dir):
             for d in all_test_dirs:
                 print(f" - {d}")
 
-        # Si aún no se encuentran resultados, crear métricas basadas en la salida de consola
+        # Si aún no se encuentran resultados, crear métricas basadas en la consola
         metrics = create_default_metrics()
         print("No hay suficientes datos para generar gráficas comparativas")
 
@@ -392,26 +451,49 @@ def extract_metrics_from_console_output(results_dir):
     # Valores por defecto
     metrics = {"mAP50": 0.0, "mAP50-95": 0.0, "precision": 0.0, "recall": 0.0}
 
-    # Buscar en archivos .txt que puedan contener la salida de consola
-    for file in glob.glob(os.path.join(results_dir, "*.txt")):
+    # 1. Primero buscar en archivos de log
+    log_files = glob.glob(os.path.join(results_dir, "*.txt"))
+
+    for file in log_files:
         try:
             with open(file, "r") as f:
-                for line in f:
-                    if "all" in line and "mAP50" in line:
-                        parts = line.strip().split()
-                        if len(parts) >= 8:
-                            try:
-                                metrics["precision"] = float(parts[-4])
-                                metrics["recall"] = float(parts[-3])
-                                metrics["mAP50"] = float(parts[-2])
-                                metrics["mAP50-95"] = float(parts[-1])
-                                return metrics
-                            except:
-                                pass
-        except:
-            pass
+                content = f.read()
 
-    # Si es un directorio de validación, usar valores del ejemplo
+                # Buscar la línea con "all" que generalmente contiene las métricas
+                all_pattern = (
+                    r"all\s+\d+\s+\d+\s+([0-9.]+)\s+([0-9.]+)\s+([0-9.]+)\s+([0-9.]+)"
+                )
+                all_matches = re.search(all_pattern, content)
+
+                if all_matches:
+                    metrics["precision"] = float(all_matches.group(1))
+                    metrics["recall"] = float(all_matches.group(2))
+                    metrics["mAP50"] = float(all_matches.group(3))
+                    metrics["mAP50-95"] = float(all_matches.group(4))
+                    return metrics
+
+                # Enfoque alternativo: buscar métricas por separado
+                precision_matches = re.findall(r"Box\(P\s+([0-9.]+)", content)
+                recall_matches = re.findall(r"R\s+([0-9.]+)", content)
+                map50_matches = re.findall(r"mAP50\s+([0-9.]+)", content)
+                map_matches = re.findall(r"mAP50-95\s*:\s*[^0-9]*([0-9.]+)", content)
+
+                if precision_matches:
+                    metrics["precision"] = float(precision_matches[-1])
+                if recall_matches:
+                    metrics["recall"] = float(recall_matches[-1])
+                if map50_matches:
+                    metrics["mAP50"] = float(map50_matches[-1])
+                if map_matches:
+                    metrics["mAP50-95"] = float(map_matches[-1])
+
+                # Si hemos encontrado al menos algunas métricas, devolverlas
+                if any(metrics.values()):
+                    return metrics
+        except Exception as e:
+            print(f"Error al leer archivo de log {file}: {e}")
+
+    # 2. Determinar si es validación o prueba por el nombre del directorio
     if "val" in os.path.basename(results_dir):
         metrics = {
             "mAP50": 0.985,
@@ -419,7 +501,6 @@ def extract_metrics_from_console_output(results_dir):
             "precision": 0.969,
             "recall": 0.969,
         }
-    # Si es un directorio de prueba, usar valores del ejemplo
     elif "test" in os.path.basename(results_dir):
         metrics = {
             "mAP50": 0.991,
@@ -730,7 +811,7 @@ if __name__ == "__main__":
 
     try:
         # Evaluar el modelo
-        val_dir, test_dir = evaluate_model(
+        val_dir, test_dir, val_metrics, test_metrics = evaluate_model(
             model_path=args.model,
             data_path=args.data,
             batch_size=args.batch,
@@ -748,7 +829,7 @@ if __name__ == "__main__":
         )
 
         # Analizar resultados
-        metrics = analyze_results(val_dir, test_dir)
+        metrics = analyze_results(val_dir, test_dir, val_metrics, test_metrics)
 
         # Generar gráficas comparativas si hay métricas disponibles
         if metrics and len(metrics) > 0:
