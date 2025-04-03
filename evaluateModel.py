@@ -405,14 +405,21 @@ def continue_training(
         # Cargar el modelo
         model = YOLO(model_path)
 
-        # Continuar entrenamiento
+        # Extraer el nombre base del modelo para el nuevo directorio
+        model_dir = os.path.dirname(os.path.dirname(model_path))
+        model_name = os.path.basename(model_dir)
+        new_name = f"continue_{model_name}"
+
+        # Continuar entrenamiento como un nuevo entrenamiento en lugar de usar "resume"
         results = model.train(
             data=data_path,
             epochs=epochs,
             batch=batch_size,
             imgsz=image_size,
             device=device,
-            resume=True,
+            # Quitamos resume=True que causaba el error
+            name=new_name,  # Usar un nombre específico para el nuevo directorio
+            exist_ok=True,  # Permitir sobreescribir si el directorio ya existe
         )
 
         # Obtener la ruta al mejor modelo
@@ -423,7 +430,7 @@ def continue_training(
             model_dir = (
                 results.save_dir
                 if hasattr(results, "save_dir")
-                else f"./runs/detect/train{epochs}"
+                else f"./runs/detect/{new_name}"
             )
             best_model = os.path.join(model_dir, "weights/best.pt")
 
@@ -438,6 +445,7 @@ def continue_training(
 
     except Exception as e:
         print(f"❌ Error durante el entrenamiento: {e}")
+        traceback.print_exc()  # Imprimir el traceback completo para mejor diagnóstico
         return None
 
 
