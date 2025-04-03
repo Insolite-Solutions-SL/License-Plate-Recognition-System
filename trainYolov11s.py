@@ -2,6 +2,7 @@
 import os
 import subprocess
 import argparse
+import glob
 
 
 def train_yolov11s(data_path, epochs=20, batch_size=16, image_size=640, device="0"):
@@ -37,11 +38,31 @@ def train_yolov11s(data_path, epochs=20, batch_size=16, image_size=640, device="
 
     # Ejecutar el comando
     print(f"Ejecutando: {' '.join(train_cmd)}")
-    subprocess.run(train_cmd)
+    result = subprocess.run(train_cmd, capture_output=True, text=True)
 
-    # Ruta donde se guardan los resultados del entrenamiento (por defecto)
-    results_path = "./runs/detect/train"
-    best_weights = os.path.join(results_path, "weights/best.pt")
+    # Analizamos la salida para encontrar el directorio donde se guardaron los resultados
+    output_lines = result.stdout.split("\n") if result.stdout else []
+
+    # Buscamos la línea que contiene "save_dir="
+    save_dir = None
+    for line in output_lines:
+        if "save_dir=" in line:
+            parts = line.strip().split()
+            for part in parts:
+                if part.startswith("save_dir="):
+                    save_dir = part.split("=")[1]
+                    break
+
+    # Si no encontramos el directorio en la salida, buscamos el directorio de entrenamiento más reciente
+    if not save_dir:
+        train_dirs = sorted(glob.glob("./runs/detect/train*"), key=os.path.getmtime)
+        if train_dirs:
+            save_dir = train_dirs[-1]  # Tomamos el más reciente
+        else:
+            save_dir = "./runs/detect/train"  # Valor por defecto
+
+    # Ruta donde se guardan los resultados del entrenamiento
+    best_weights = os.path.join(save_dir, "weights/best.pt")
 
     # Validar el modelo después del entrenamiento
     if os.path.exists(best_weights):
@@ -61,11 +82,19 @@ def train_yolov11s(data_path, epochs=20, batch_size=16, image_size=640, device="
         print(f"\nEvaluando modelo: {' '.join(val_cmd)}")
         subprocess.run(val_cmd)
 
-        print("\nProceso completo. Revisa los resultados en la carpeta 'runs/detect'.")
+        print(f"\nProceso completo. Revisa los resultados en la carpeta '{save_dir}'.")
+        return best_weights
     else:
         print(
-            f"\nEntrenamiento completado, pero no se encontró el archivo de pesos: {best_weights}"
+            f"\nEntrenamiento completado, pero no se encontró el archivo de pesos en: {best_weights}"
         )
+        # Buscar si el modelo se guardó en otra ubicación
+        all_best_weights = glob.glob("./runs/detect/train*/weights/best.pt")
+        if all_best_weights:
+            newest_weights = max(all_best_weights, key=os.path.getmtime)
+            print(f"Se encontró un modelo más reciente en: {newest_weights}")
+            return newest_weights
+        return None
 
 
 if __name__ == "__main__":

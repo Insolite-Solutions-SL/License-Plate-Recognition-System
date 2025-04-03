@@ -201,6 +201,9 @@ def continue_training(
     model_name = os.path.basename(model_path).split(".")[0]
     output_name = f"continue_{model_name}"
 
+    # Obtener una lista de directorios existentes antes del entrenamiento
+    existing_dirs = set(glob.glob("./runs/detect/*"))
+
     # Comando para continuar el entrenamiento
     train_cmd = [
         "yolo",
@@ -223,9 +226,40 @@ def continue_training(
     )
     print(f"Ejecutando: {' '.join(train_cmd)}")
 
-    subprocess.run(train_cmd)
+    result = subprocess.run(train_cmd, capture_output=True, text=True)
 
-    best_weights = os.path.join("./runs/detect", output_name, "weights/best.pt")
+    # Analizamos la salida para encontrar el directorio donde se guardaron los resultados
+    output_lines = result.stdout.split("\n") if result.stdout else []
+
+    # Buscamos la línea que contiene "save_dir="
+    save_dir = None
+    for line in output_lines:
+        if "save_dir=" in line:
+            parts = line.strip().split()
+            for part in parts:
+                if part.startswith("save_dir="):
+                    save_dir = part.split("=")[1]
+                    break
+
+    # Si no encontramos el directorio en la salida, buscamos comparando los directorios antes y después
+    if not save_dir:
+        new_dirs = set(glob.glob("./runs/detect/*"))
+        added_dirs = new_dirs - existing_dirs
+
+        # Buscar directorios que coincidan con el patrón "continue_*"
+        continue_dirs = [
+            d for d in added_dirs if os.path.basename(d).startswith("continue_")
+        ]
+
+        if continue_dirs:
+            # Tomar el directorio más reciente
+            save_dir = max(continue_dirs, key=os.path.getmtime)
+        else:
+            # Si no encontramos nada, usar el nombre esperado
+            save_dir = f"./runs/detect/{output_name}"
+
+    # Ruta completa al modelo
+    best_weights = os.path.join(save_dir, "weights/best.pt")
 
     if os.path.exists(best_weights):
         print(
@@ -234,8 +268,14 @@ def continue_training(
         return best_weights
     else:
         print(
-            f"\nNo se encontró el archivo de pesos después del entrenamiento adicional"
+            f"\nNo se encontró el archivo de pesos después del entrenamiento adicional en: {best_weights}"
         )
+        # Buscar en cualquier directorio de continue_ reciente
+        continue_models = glob.glob("./runs/detect/continue_*/weights/best.pt")
+        if continue_models:
+            newest_model = max(continue_models, key=os.path.getmtime)
+            print(f"Sin embargo, se encontró un modelo reciente en: {newest_model}")
+            return newest_model
         return None
 
 
