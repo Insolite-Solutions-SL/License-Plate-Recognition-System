@@ -131,7 +131,13 @@ def evaluate_model(model_path, data_path, batch_size=16, image_size=640, device=
 
 
 def visualize_predictions(
-    model_path, data_path, num_samples=10, image_size=640, device="0"
+    model_path,
+    data_path,
+    num_samples=10,
+    image_size=640,
+    device="0",
+    metrics=None,
+    output_dir=None,
 ):
     """
     Visualiza predicciones en algunas imágenes aleatorias del conjunto de prueba
@@ -143,6 +149,8 @@ def visualize_predictions(
         num_samples (int): Número de muestras aleatorias para visualizar
         image_size (int): Tamaño de las imágenes
         device (str): Dispositivo para inferencia
+        metrics (dict): Diccionario con métricas para incluir en el README
+        output_dir (str): Directorio de salida (si ya existe)
     """
     # Verificar que YOLO está disponible
     if not YOLO_AVAILABLE:
@@ -182,10 +190,13 @@ def visualize_predictions(
         # Preparar directorios para guardar las visualizaciones
         model_dir = os.path.dirname(os.path.dirname(model_path))
         train_name = os.path.basename(model_dir)
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
-        prediction_base_dir = "./predictions_best"
-        output_dir = os.path.join(prediction_base_dir, train_name, timestamp)
+        # Si no se proporciona un directorio, crear uno nuevo
+        if output_dir is None:
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            results_base_dir = "./resultados"
+            output_dir = os.path.join(results_base_dir, train_name, timestamp)
+
         os.makedirs(output_dir, exist_ok=True)
 
         print(f"\n=== Generando visualizaciones para {len(samples)} imágenes ===")
@@ -205,20 +216,64 @@ def visualize_predictions(
                 save=True,
                 save_txt=True,
                 save_conf=True,
-                project=prediction_base_dir,
-                name=os.path.join(train_name, timestamp),
+                project=os.path.dirname(output_dir),
+                name=os.path.basename(output_dir),
             )
 
             print(f"Visualizaciones guardadas en: {output_dir}")
 
-            # Crear un archivo README en el directorio de visualizaciones
+            # Crear un archivo README con métricas e información
             with open(os.path.join(output_dir, "README.txt"), "w") as f:
-                f.write(f"Visualizaciones para el modelo: {model_path}\n")
+                f.write(f"# Resultados de evaluación del modelo\n\n")
+                f.write(f"Modelo evaluado: {model_path}\n")
                 f.write(
-                    f"Generadas el: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                    f"Fecha de evaluación: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
                 )
-                f.write(f"Número de muestras: {num_samples}\n")
                 f.write(f"Tamaño de imagen: {image_size}x{image_size}\n")
+                f.write(f"Número de muestras visualizadas: {num_samples}\n\n")
+
+                # Incluir métricas si están disponibles
+                if metrics and "val" in metrics and "test" in metrics:
+                    f.write(f"## Métricas\n\n")
+                    f.write(f"### Validación\n")
+                    f.write(f"- mAP@0.5: {metrics['val']['mAP50']:.4f}\n")
+                    f.write(f"- mAP@0.5-0.95: {metrics['val']['mAP50-95']:.4f}\n")
+                    f.write(f"- Precision: {metrics['val']['precision']:.4f}\n")
+                    f.write(f"- Recall: {metrics['val']['recall']:.4f}\n\n")
+
+                    f.write(f"### Prueba\n")
+                    f.write(f"- mAP@0.5: {metrics['test']['mAP50']:.4f}\n")
+                    f.write(f"- mAP@0.5-0.95: {metrics['test']['mAP50-95']:.4f}\n")
+                    f.write(f"- Precision: {metrics['test']['precision']:.4f}\n")
+                    f.write(f"- Recall: {metrics['test']['recall']:.4f}\n\n")
+
+                    # Calcular promedios
+                    avg_map50 = (metrics["val"]["mAP50"] + metrics["test"]["mAP50"]) / 2
+                    avg_map50_95 = (
+                        metrics["val"]["mAP50-95"] + metrics["test"]["mAP50-95"]
+                    ) / 2
+
+                    f.write(f"### Evaluación de calidad\n")
+                    if avg_map50 > 0.95 and avg_map50_95 > 0.7:
+                        f.write("Calidad del modelo: EXCELENTE\n")
+                        f.write("- Alta precisión en detección de placas\n")
+                        f.write("- Adecuado para implementación en producción\n")
+                    elif avg_map50 > 0.90 and avg_map50_95 > 0.65:
+                        f.write("Calidad del modelo: MUY BUENA\n")
+                        f.write("- Buen rendimiento general\n")
+                        f.write(
+                            "- Puede considerar entrenamiento adicional para perfeccionar\n"
+                        )
+                    elif avg_map50 > 0.85 and avg_map50_95 > 0.6:
+                        f.write("Calidad del modelo: BUENA\n")
+                        f.write("- Rendimiento aceptable\n")
+                        f.write("- Recomendado continuar entrenamiento para mejorar\n")
+                    else:
+                        f.write("Calidad del modelo: NECESITA MEJORA\n")
+                        f.write(
+                            "- Considere entrenamiento adicional o ajuste de hiperparámetros\n"
+                        )
+                        f.write("- Evalúe si el conjunto de datos necesita mejoras\n")
 
             return output_dir
 
@@ -227,12 +282,13 @@ def visualize_predictions(
         return None
 
 
-def plot_metrics_comparison(metrics):
+def plot_metrics_comparison(metrics, output_dir=None):
     """
     Genera gráficas comparativas de las métricas entre los conjuntos de validación y prueba.
 
     Args:
         metrics (dict): Diccionario con las métricas para cada conjunto
+        output_dir (str): Directorio donde guardar la imagen (además de la raíz)
     """
     if not metrics or len(metrics) < 2:
         print("No hay suficientes datos para generar gráficas comparativas")
@@ -295,8 +351,16 @@ def plot_metrics_comparison(metrics):
 
     # Ajustar layout y guardar
     plt.tight_layout(rect=[0, 0, 1, 0.95])
+
+    # Guardar en el directorio raíz para compatibilidad
     plt.savefig("./metrics_comparison.png")
-    print("\nGráfica comparativa guardada como: metrics_comparison.png")
+
+    # Guardar también en el directorio de resultados si se proporciona
+    if output_dir:
+        plt.savefig(os.path.join(output_dir, "metrics_comparison.png"))
+        print(f"\nGráfica comparativa guardada en: {output_dir}/metrics_comparison.png")
+    else:
+        print("\nGráfica comparativa guardada como: metrics_comparison.png")
 
 
 def continue_training(
@@ -486,23 +550,33 @@ if __name__ == "__main__":
             device=args.device,
         )
 
-        # Visualizar algunas predicciones
+        # Crear un diccionario de métricas para análisis
+        metrics = {"val": val_metrics, "test": test_metrics}
+
+        # Preparar directorio único para todos los resultados
+        model_dir = os.path.dirname(os.path.dirname(args.model))
+        train_name = os.path.basename(model_dir)
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        results_base_dir = "./resultados"
+        results_dir = os.path.join(results_base_dir, train_name, timestamp)
+        os.makedirs(results_dir, exist_ok=True)
+
+        # Generar gráficas comparativas y guardarlas en el directorio de resultados
+        if metrics and len(metrics) > 0:
+            plot_metrics_comparison(metrics, results_dir)
+        else:
+            print("\nNo hay suficientes datos para generar gráficas comparativas")
+
+        # Visualizar predicciones y guardar en el mismo directorio de resultados
         vis_dir = visualize_predictions(
             model_path=args.model,
             data_path=args.data,
             num_samples=args.samples,
             image_size=args.imgsz,
             device=args.device,
+            metrics=metrics,
+            output_dir=results_dir,
         )
-
-        # Crear un diccionario de métricas para análisis
-        metrics = {"val": val_metrics, "test": test_metrics}
-
-        # Generar gráficas comparativas si hay métricas disponibles
-        if metrics and len(metrics) > 0:
-            plot_metrics_comparison(metrics)
-        else:
-            print("\nNo hay suficientes datos para generar gráficas comparativas")
 
         # Continuar entrenamiento si se solicitó
         if args.continue_epochs > 0:
@@ -532,7 +606,7 @@ if __name__ == "__main__":
         print("\n=== PROCESO COMPLETO ===")
         print(f"Resultados de validación: {recent_val_dir}")
         print(f"Resultados de prueba: {recent_test_dir}")
-        print(f"Visualizaciones: {vis_dir if vis_dir else 'No se pudieron generar'}")
+        print(f"Visualizaciones y métricas: {results_dir}")
 
         # Resumen de métricas obtenidas
         if metrics and "val" in metrics and "test" in metrics:
