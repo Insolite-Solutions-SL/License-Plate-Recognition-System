@@ -67,8 +67,8 @@ def evaluate_model(model_path, data_path, batch_size=16, image_size=640, device=
         val_results = {
             "mAP50": float(val_metrics.box.map50),
             "mAP50-95": float(val_metrics.box.map),
-            "precision": float(val_metrics.box.mp()),
-            "recall": float(val_metrics.box.mr()),
+            "precision": float(val_metrics.box.mp),
+            "recall": float(val_metrics.box.mr),
         }
 
         # Obtener directorio de resultados
@@ -104,8 +104,8 @@ def evaluate_model(model_path, data_path, batch_size=16, image_size=640, device=
         test_results = {
             "mAP50": float(test_metrics.box.map50),
             "mAP50-95": float(test_metrics.box.map),
-            "precision": float(test_metrics.box.mp()),
-            "recall": float(test_metrics.box.mr()),
+            "precision": float(test_metrics.box.mp),
+            "recall": float(test_metrics.box.mr),
         }
 
         # Obtener directorio de resultados
