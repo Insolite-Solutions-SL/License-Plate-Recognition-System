@@ -1,84 +1,220 @@
-## License Plate Recognition System
+# Sistema de Reconocimiento de Placas de Matrícula
 
-## **Overview**
-This project presents a **License Plate Recognition (LPR)** system using **YOLO models** for object detection and **EasyOCR** for text recognition, designed to achieve real-time, accurate license plate detection. Trained on a diverse, hybrid dataset of over **52,000 labeled images**, the system demonstrates strong performance with high precision and recall, making it suitable for applications like traffic monitoring, automated tolling, and parking management.
+## **Descripción General**
 
-## **Features**
-- **YOLO-based Object Detection**: Uses **YOLO models** for detecting license plates in real-time.
-- **EasyOCR for Text Recognition**: Extracts alphanumeric characters from detected license plates.
-- **Hybrid Dataset**: Combines three different datasets containing a variety of challenging scenarios such as occlusions, lighting inconsistencies, and pose variations.
-- **Data Augmentation**: Includes transformations like flipping, cropping, rotation, and color adjustments to simulate real-world conditions and improve model robustness.
+Este proyecto presenta un **Sistema de Reconocimiento de Placas de Matrícula (LPR)** que utiliza **modelos YOLO** para la detección de objetos y **EasyOCR** para el reconocimiento de texto, diseñado para lograr una detección precisa y en tiempo real de placas de matrícula. Entrenado con un conjunto de datos híbrido y diverso de más de **52.000 imágenes etiquetadas**, el sistema demuestra un rendimiento sólido con alta precisión y recall, haciéndolo adecuado para aplicaciones como monitorización de tráfico, peajes automatizados y gestión de estacionamientos.
 
-## **Dataset**
-The dataset consists of images sourced from multiple projects:
-- **Dataset 1**: 21,175 images from a license plate recognition computer vision project.
-- **Dataset 2**: 6,784 images from the license plates of vehicles in Turkey project.
-- **Dataset 3**: 24,242 images from a vehicle registration plates project.
+## **Características**
 
-This hybrid dataset contains a total of **52,201 labeled images**, split into training, validation, and test sets:
-- **Training**: 46,278 images (87%)
-- **Validation**: 3,957 images (8%)
-- **Test**: 1,966 images (4%)
+- **Detección de Objetos basada en YOLO**: Utiliza **modelos YOLO** para detectar placas de matrícula en tiempo real.
+- **EasyOCR para Reconocimiento de Texto**: Extrae caracteres alfanuméricos de las placas de matrícula detectadas.
+- **Conjunto de Datos Híbrido**: Combina tres conjuntos de datos diferentes que contienen una variedad de escenarios desafiantes como oclusiones, inconsistencias de iluminación y variaciones de pose.
+- **Aumento de Datos**: Incluye transformaciones como volteo, recorte, rotación y ajustes de color para simular condiciones del mundo real y mejorar la robustez del modelo.
 
-### **Preprocessing**
-- **Resize**: All images were resized to **640x640** pixels.
-- **Data Augmentation**: Includes horizontal flipping, rotation, cropping, grayscale conversion, and adjustments in brightness, hue, saturation, and contrast.
+## **Conjunto de Datos**
 
-## **Model Architecture**
-We evaluated several **YOLO models**, including:
-- **YOLOv8** and **YOLOv11** (with various configurations: **n**, **s**, **m**, **l**, **x**).
-- **EasyOCR** for optical character recognition from detected license plates.
+El conjunto de datos consiste en imágenes procedentes de múltiples proyectos:
 
-### **Key Insights**
-- **YOLOv11x** achieved the highest mean Average Precision (**mAP**) of **0.98466 at IoU 50%** and **0.71605 at IoU 50-95%** after 20 epochs.
-- **YOLOv11n**, a lightweight model, achieved high performance with similar precision and recall values after 100 epochs.
-- The **YOLOv11m** model achieved the best balance of performance and accuracy, with the highest **mAP@50-95** of **0.71743**.
+- **Conjunto de Datos 1**: 21.175 imágenes de un proyecto de visión por computador de reconocimiento de placas de matrícula.
+- **Conjunto de Datos 2**: 6.784 imágenes del proyecto de placas de matrícula de vehículos en Turquía.
+- **Conjunto de Datos 3**: 24.242 imágenes de un proyecto de placas de matrícula de vehículos.
 
-## **Performance Evaluation**
-The system was evaluated using **Precision**, **Recall**, and **mean Average Precision (mAP)** at both **IoU 50%** and **IoU 50-95%**. The results showed improvements in recall and mAP with extended training, particularly in **YOLOv8** and **YOLOv11** models trained for **100 epochs**.
+Este conjunto de datos híbrido contiene un total de **52.201 imágenes etiquetadas**, divididas en conjuntos de entrenamiento, validación y prueba:
 
-### **Example Results:**
-- **YOLOv8** (10 epochs) achieved:
-  - **Precision (P)**: 0.974
+- **Entrenamiento**: 46.278 imágenes (87%)
+- **Validación**: 3.957 imágenes (8%)
+- **Prueba**: 1.966 imágenes (4%)
+
+### **Preprocesamiento**
+
+- **Redimensionamiento**: Todas las imágenes fueron redimensionadas a **640x640** píxeles.
+- **Aumento de Datos**: Incluye volteo horizontal, rotación, recorte, conversión a escala de grises y ajustes en brillo, tono, saturación y contraste.
+
+## **Arquitectura del Modelo**
+
+Evaluamos varios **modelos YOLO**, incluyendo:
+
+- **YOLOv8** y **YOLOv11** (con varias configuraciones: **n**, **s**, **m**, **l**, **x**).
+- **EasyOCR** para el reconocimiento óptico de caracteres de las placas de matrícula detectadas.
+
+### **Hallazgos Clave**
+
+- **YOLOv11x** logró la mayor Precisión media (**mAP**) de **0.98466 en IoU 50%** y **0.71605 en IoU 50-95%** después de 20 épocas.
+- **YOLOv11n**, un modelo ligero, logró un alto rendimiento con valores similares de precisión y recall después de 100 épocas.
+- El modelo **YOLOv11m** logró el mejor equilibrio entre rendimiento y precisión, con el **mAP@50-95** más alto de **0.71743**.
+
+## **Evaluación de Rendimiento**
+
+El sistema fue evaluado utilizando **Precisión**, **Recall** y **Precisión media (mAP)** tanto en **IoU 50%** como en **IoU 50-95%**. Los resultados mostraron mejoras en recall y mAP con entrenamiento extendido, particularmente en modelos **YOLOv8** y **YOLOv11** entrenados durante **100 épocas**.
+
+### **Resultados de Ejemplo:**
+
+- **YOLOv8** (10 épocas) logró:
+
+  - **Precisión (P)**: 0.974
   - **Recall (R)**: 0.954
   - **mAP@50**: 0.978
   - **mAP@50-95**: 0.682
 
-- **YOLOv11** (10 epochs) achieved:
-  - **Precision (P)**: 0.981
+- **YOLOv11** (10 épocas) logró:
+  - **Precisión (P)**: 0.981
   - **Recall (R)**: 0.951
   - **mAP@50**: 0.981
   - **mAP@50-95**: 0.682
 
-Training for **100 epochs** significantly enhanced detection capabilities, improving **mAP@50-95** by up to **4.25%**.
+El entrenamiento durante **100 épocas** mejoró significativamente las capacidades de detección, aumentando el **mAP@50-95** hasta en un **4.25%**.
 
-## **Ablation Study**
-An **Ablation Study** was conducted to evaluate the performance of different variants of **YOLOv11** models trained on the hybrid dataset. The study aimed to assess the trade-offs between model precision, recall, and computational efficiency.
+## **Estudio de Ablación**
 
-### **YOLOv11 Model Variants**
-The following **YOLOv11** variants were evaluated:
-- **YOLOv11n** (lightweight)
+Se realizó un **Estudio de Ablación** para evaluar el rendimiento de diferentes variantes de modelos **YOLOv11** entrenados en el conjunto de datos híbrido. El estudio tenía como objetivo evaluar las compensaciones entre la precisión del modelo, el recall y la eficiencia computacional.
+
+### **Variantes del Modelo YOLOv11**
+
+Se evaluaron las siguientes variantes de **YOLOv11**:
+
+- **YOLOv11n** (ligero)
 - **YOLOv11s**
 - **YOLOv11m**
 - **YOLOv11l**
-- **YOLOv11x** (largest model)
+- **YOLOv11x** (modelo más grande)
 
-### **Performance Comparison**
+### **Comparación de Rendimiento**
 
-The results of the ablation study are summarized in the table below:
+Los resultados del estudio de ablación se resumen en la tabla a continuación:
 
-| **Model**     | **Precision (B)** | **Recall (B)** | **mAP@50 (B)** | **mAP@50-95 (B)** |
-|---------------|-------------------|----------------|----------------|-------------------|
-| **YOLOv11x**  | 0.97384           | 0.95932        | 0.98387        | 0.71605           |
-| **YOLOv11l**  | 0.96733           | 0.96591        | 0.98497        | 0.71454           |
-| **YOLOv11m**  | 0.97035           | 0.96761        | 0.98582        | 0.71743           |
-| **YOLOv11s**  | 0.97312           | 0.96170        | 0.98477        | 0.71344           |
-| **YOLOv11n**  | 0.97125           | 0.95849        | 0.98235        | 0.71064           |
+| **Modelo**   | **Precisión (B)** | **Recall (B)** | **mAP@50 (B)** | **mAP@50-95 (B)** |
+| ------------ | ----------------- | -------------- | -------------- | ----------------- |
+| **YOLOv11x** | 0.97384           | 0.95932        | 0.98387        | 0.71605           |
+| **YOLOv11l** | 0.96733           | 0.96591        | 0.98497        | 0.71454           |
+| **YOLOv11m** | 0.97035           | 0.96761        | 0.98582        | 0.71743           |
+| **YOLOv11s** | 0.97312           | 0.96170        | 0.98477        | 0.71344           |
+| **YOLOv11n** | 0.97125           | 0.95849        | 0.98235        | 0.71064           |
 
-### **Key Findings**
-- **YOLOv11m** achieved the highest **mAP@50-95** (**0.71743**), making it the best choice for applications requiring high accuracy.
-- **YOLOv11x** achieved the highest **Precision (B)** (**0.97384**), suitable for applications prioritizing detection accuracy.
-- **YOLOv11l** achieved the highest **Recall (B)** (**0.96591**), indicating its capability to minimize missed detections.
-- **YOLOv11n** and **YOLOv11s** are lightweight models that balance computational efficiency with satisfactory detection metrics, making them ideal for deployment on edge devices.
+### **Hallazgos Clave**
 
-These results provide insights into the trade-offs between precision, recall, and computational requirements for each variant, allowing tailored model selection based on application-specific needs.
+- **YOLOv11m** logró el **mAP@50-95** más alto (**0.71743**), convirtiéndolo en la mejor opción para aplicaciones que requieren alta precisión.
+- **YOLOv11x** logró la **Precisión (B)** más alta (**0.97384**), adecuado para aplicaciones que priorizan la precisión de detección.
+- **YOLOv11l** logró el **Recall (B)** más alto (**0.96591**), indicando su capacidad para minimizar detecciones perdidas.
+- **YOLOv11n** y **YOLOv11s** son modelos ligeros que equilibran la eficiencia computacional con métricas de detección satisfactorias, haciéndolos ideales para implementación en dispositivos edge.
+
+Estos resultados proporcionan información sobre las compensaciones entre precisión, recall y requisitos computacionales para cada variante, permitiendo la selección del modelo adaptado a necesidades específicas de la aplicación.
+
+## **Guía Rápida para el Entrenamiento**
+
+Esta sección proporciona una guía simplificada para entrenar tu propio modelo de detección de placas de matrícula. Para instrucciones detalladas, ejemplos y solución de problemas, consulta el archivo [README_TRAINING.md](README_TRAINING.md).
+
+### Importante: Uso de Rutas Absolutas
+
+Al ejecutar comandos de entrenamiento o evaluación, debes especificar rutas absolutas para los archivos de datos. Esto es porque YOLOv busca los archivos relativos a su directorio de conjuntos de datos configurado, no al directorio de trabajo actual.
+
+```bash
+# Usa $(pwd) para obtener la ruta absoluta al directorio actual
+python trainYolov11s.py --epochs 20 --batch 16 --device 0 --data $(pwd)/data/data.yaml
+
+# Lo mismo aplica para la evaluación
+python evaluateModel.py --model runs/detect/train/weights/best.pt --data $(pwd)/data/data.yaml
+```
+
+Esta solución evita el error "Dataset images not found" que ocurre cuando se utilizan rutas relativas.
+
+### Nota sobre Directorios de Entrenamiento Incrementales
+
+YOLO crea directorios con nombres incrementales para cada nueva ejecución de entrenamiento (train, train2, train3, etc.) para evitar sobrescribir resultados anteriores. Los scripts del sistema están actualizados para detectar automáticamente estos directorios incrementales, por lo que siempre buscarán en el directorio más reciente.
+
+### Visión General del Proceso de Entrenamiento
+
+1. **Preparar el entorno local (NUEVO)**:
+
+   ```bash
+   # Crear estructura local mínima para evaluación (si no tienes los datos completos)
+   python prepareLocalData.py
+
+   # O importar datos desde un directorio existente
+   python prepareLocalData.py --import-from /ruta/a/datos/existentes
+   ```
+
+2. **Combinar conjuntos de datos**:
+
+   ```bash
+   python combineDatasets.py
+   ```
+
+3. **Entrenar el modelo**:
+
+   ```bash
+   python trainYolov11s.py --epochs 20 --batch 16 --device 0 --data $(pwd)/data/data.yaml
+   ```
+
+4. **Evaluar el modelo**:
+
+   ```bash
+   python evaluateModel.py --model runs/detect/train/weights/best.pt --data $(pwd)/data/data.yaml
+   ```
+
+5. **Continuar el entrenamiento (si es necesario)**:
+
+   ```bash
+   python evaluateModel.py --model runs/detect/train/weights/best.pt --data $(pwd)/data/data.yaml --continue-epochs 20
+   ```
+
+6. **Comparar modelos**:
+   ```bash
+   python evaluateModel.py --list-models
+   ```
+
+### Trabajando con Datos Remotos y Locales (NUEVO)
+
+Este proyecto está diseñado para funcionar tanto en servidores de entrenamiento con conjuntos de datos completos como en máquinas locales para evaluación:
+
+1. **En servidores de entrenamiento**: Utiliza `combineDatasets.py` para generar el conjunto de datos completo y entrenar modelos.
+
+2. **En máquinas locales (sin datos completos)**:
+
+   - Utiliza `prepareLocalData.py` para crear una estructura mínima que permita evaluar modelos sin errores
+   - Si tienes acceso parcial a los datos, usa la opción `--import-from` para copiar una muestra representativa
+
+3. **Para transferir modelos entre entornos**:
+   - Entrena en el servidor con datos completos
+   - Transfiere los modelos (.pt) y una pequeña muestra de datos al entorno local
+   - Usa `evaluateModel.py` con el parámetro `--device cpu` para evaluación en máquinas sin GPU
+
+Este enfoque te permite entrenar en entornos potentes y evaluar/presentar resultados en cualquier máquina.
+
+### Script de Flujo de Trabajo Unificado (NUEVO)
+
+Para simplificar todo el proceso, hemos creado un script unificado `licensePlateWorkflow.py` que integra todas las herramientas:
+
+```bash
+# Ver todas las opciones disponibles
+python licensePlateWorkflow.py --help
+
+# Crear estructura local mínima para evaluación
+python licensePlateWorkflow.py prepare-local
+
+# Ejecutar el flujo de trabajo completo (local, CPU)
+python licensePlateWorkflow.py workflow --local --device cpu
+
+# Continuar entrenamiento de un modelo existente
+python licensePlateWorkflow.py continue-training runs/detect/train2/weights/best.pt --continue-epochs 20
+
+# Evaluar un modelo específico
+python licensePlateWorkflow.py evaluate --model runs/detect/train2/weights/best.pt --device cpu
+```
+
+Este script unifica todos los pasos del flujo de trabajo, proporciona mensajes de estado detallados y maneja errores de manera elegante.
+
+## **Estructura de la Documentación**
+
+Este proyecto incluye dos archivos README:
+
+1. **README.md** (este archivo): Proporciona una visión general del proyecto, características, información del conjunto de datos, arquitectura del modelo, resultados de rendimiento y una guía rápida para el entrenamiento.
+
+2. **[README_TRAINING.md](README_TRAINING.md)**: Contiene instrucciones detalladas para el proceso completo de entrenamiento, incluyendo:
+   - Guía paso a paso para combinar conjuntos de datos, entrenamiento y evaluación
+   - Explicaciones en profundidad de los parámetros de entrenamiento y sus efectos
+   - Información detallada sobre cómo interpretar métricas y visualizaciones del modelo
+   - Ejemplos de modelos buenos, sobreajustados y subajustados con acciones sugeridas
+   - Un flujo de trabajo iterativo para obtener el mejor modelo posible
+   - Solución de problemas comunes durante el entrenamiento
+
+Si estás buscando comprender la arquitectura y resultados del proyecto, este README proporciona toda la información esencial. Si quieres entrenar tus propios modelos o mejorar los existentes, consulta el [README_TRAINING.md](README_TRAINING.md) para instrucciones completas.
