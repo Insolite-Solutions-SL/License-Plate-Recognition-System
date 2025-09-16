@@ -1,4 +1,5 @@
 content/
 data/
 runs/
+results
 .DS_Store
