@@ -1,0 +1,8 @@
+Captura de pantalla 2025-05-04 190723: T 1 (conf: 0.68)
+Captura de pantalla 2025-05-04 190723: - TT (conf: 0.25)
+Captura de pantalla 2025-05-04 190117: No license plates detected
+Captura de pantalla 2025-05-04 182858: 1 (conf: 0.27)
+Captura de pantalla 2025-05-04 190723: T 1 (conf: 0.68)
+Captura de pantalla 2025-05-04 190723: - TT (conf: 0.25)
+Captura de pantalla 2025-05-04 190117: No license plates detected
+Captura de pantalla 2025-05-04 182858: 1 (conf: 0.27)
