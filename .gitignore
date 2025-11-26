@@ -2,3 +2,4 @@ content/
 data/
 runs/
 .DS_Store
+*.pt
